@@ -1,0 +1,24 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    host: true,
+    proxy: {
+      // Forward all backend calls so the frontend can use relative paths
+      '/auth':         { target: 'http://localhost:8000', changeOrigin: true },
+      '/emergencies':  { target: 'http://localhost:8000', changeOrigin: true },
+      '/ambulances':   { target: 'http://localhost:8000', changeOrigin: true },
+      '/hospitals':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/dispatches':   { target: 'http://localhost:8000', changeOrigin: true },
+      '/ai':           { target: 'http://localhost:8000', changeOrigin: true },
+      '/analytics':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/health':       { target: 'http://localhost:8000', changeOrigin: true },
+      '/socket.io':    { target: 'http://localhost:8000', changeOrigin: true, ws: true },
+    },
+  },
+  build: { outDir: 'dist', sourcemap: false },
+})
