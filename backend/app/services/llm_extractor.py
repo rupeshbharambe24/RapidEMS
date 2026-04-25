@@ -179,14 +179,20 @@ class LLMExtractor:
             "generationConfig": {
                 "response_mime_type": "application/json",
                 "temperature": 0.1,
-                "maxOutputTokens": 800,
+                "maxOutputTokens": 1500,
             },
         }
         params = {"key": settings.gemini_api_key}
         r = await client.post(url, params=params, json=body)
         r.raise_for_status()
         data = r.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        # Gemini 2.x can return multiple parts (thinking + answer) — concat all text.
+        parts = data["candidates"][0].get("content", {}).get("parts", []) or []
+        joined = "".join(p.get("text", "") for p in parts)
+        if not joined.strip():
+            raise ValueError(f"empty Gemini response (finishReason="
+                             f"{data['candidates'][0].get('finishReason')!r})")
+        return joined
 
     # ── parsing & sanitisation ─────────────────────────────────────────
     @staticmethod
