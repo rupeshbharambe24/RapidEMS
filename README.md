@@ -1,283 +1,549 @@
-# 🚑 AI-Enabled Smart Emergency Response & Ambulance Coordination System
+# RapidEMS — Rapid Emergency Management System
 
-A production-grade hackathon system that triages emergencies, dispatches the nearest capable ambulance, and routes to the best hospital — all powered by **5 trained ML models** working in concert. Now with a complete **mission-control React frontend** (Vite + Leaflet + Socket.IO).
-
-> **Status:** Phase 1 (backend + simulator) ✅, Phase 2 (frontend) ✅ — full stack ready to demo.
+End-to-end emergency-response platform: triages incoming calls, dispatches the
+nearest capable ambulance, and routes the patient to the best-fit hospital.
+Backed by five locally trained ML models, an optional LLM intake layer for
+free-text caller transcripts, and a live mission-control dashboard.
 
 ---
 
-## ⚡ Quick start
+## 1. What it does
+
+```
+caller transcript ─►  POST /ai/extract           (LLM, optional)
+                          │
+                          ▼
+                    auto-filled intake form
+                          │
+                          ▼
+                    POST /emergencies            ─►  Severity classifier
+                                                       │
+                                                       ▼
+                    POST /emergencies/{id}/dispatch    Ambulance type filter
+                                                       │
+                                                       ▼
+                                                     Traffic predictor + ETA
+                                                       │
+                                                       ▼
+                                                     Hospital recommender
+                                                       │
+                                                       ▼
+                                            Dispatch record + Socket.IO event
+```
+
+End-to-end decision time is sub-second once intake is filled. The intake LLM
+adds ~700 ms (Groq) or ~3.6 s (Gemini) but is optional and only runs when the
+dispatcher chooses to parse a transcript.
+
+---
+
+## 2. Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Frontend  (Vite + React 18 + Tailwind 3 + Leaflet + Socket.IO)      │
+│  http://localhost:5173                                               │
+│  Pages: Login · Dashboard · Intake · Fleet · Facilities · Analytics  │
+│  Stores: Zustand per resource (auth, ambulances, emergencies, …)     │
+└────────────────────┬─────────────────────────────────────────────────┘
+                     │  REST + Socket.IO (Vite proxy → :8000)
+                     ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Backend  (FastAPI 0.115 + SQLAlchemy 2 + python-socketio)           │
+│  http://localhost:8000   /docs for OpenAPI explorer                  │
+│                                                                      │
+│  api/        auth, emergencies, ambulances, hospitals, dispatches,   │
+│              ai (incl. /ai/extract), analytics                       │
+│  services/   ai_service        – loads 5 ML models, heuristic fallbk │
+│              llm_extractor     – Groq → Gemini → heuristic skim      │
+│              dispatch_engine   – orchestrator                        │
+│              auth_service, geo_service                               │
+│  sockets/    sio.py            – live channels                       │
+│  models/     7 SQLAlchemy ORM tables                                 │
+│  schemas/    Pydantic v2 request/response                            │
+└────┬─────────────────┬────────────────────────────────┬──────────────┘
+     │                 │                                │
+     ▼                 ▼                                ▼
+SQLite (WAL mode)  ai_models/*.pkl, *.keras       Groq / Gemini
+(8 hospitals,      severity, ETA (xgb+lgbm+cat),  (optional, free tiers)
+ 20 ambulances,    hospital recommender, traffic,
+ 1 admin user)     hotspot LSTM
+     ▲
+     │
+┌────┴─────────────────────────────────────────────────────────────────┐
+│  Simulator  (Python asyncio)                                         │
+│  Drives the 20 seeded ambulances through the dispatch lifecycle:     │
+│  AVAILABLE → EN_ROUTE → ON_SCENE → TRANSPORTING → at hospital →      │
+│  RETURNING → AVAILABLE. Reports GPS via PATCH /ambulances/{id}/      │
+│  location every 2 seconds.                                           │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+A single launcher (`run.py`) creates `.venv`, installs Python and Node
+dependencies, initialises the database, detects ML model files, and spawns
+backend + simulator + Vite as managed subprocesses with a shared Ctrl-C
+shutdown.
+
+---
+
+## 3. The 5 ML models
+
+| # | Model | Architecture | Training notebook | Used by |
+|---|---|---|---|---|
+| 1 | **Severity classifier** | Soft-voting ensemble (XGBoost + LightGBM + CatBoost) with isotonic calibration, SMOTE-balanced | `notebooks/01_severity_classifier.ipynb` | Triage at dispatch |
+| 2 | **ETA predictor** | Averaged ensemble of 3 gradient boosters (XGBoost + LightGBM + CatBoost) | `notebooks/02_eta_predictor.ipynb` | Ambulance ranking |
+| 3 | **Hospital recommender** | XGBoost regressor with NDCG@3 ranking eval | `notebooks/03_hospital_recommender.ipynb` | Hospital selection |
+| 4 | **Traffic predictor** | LightGBM with cyclical hour/day features | `notebooks/04_traffic_predictor.ipynb` | Feeds ETA |
+| 5 | **Hotspot forecaster** | Stacked / Bidirectional LSTM (Keras) with dropout + Huber loss | `notebooks/05_hotspot_forecaster_lstm.ipynb` | Analytics, pre-positioning |
+
+All five train on synthetic-but-realistic data generated inside their
+notebooks — no external dataset required. Saved artifacts live in
+`backend/ai_models/`.
+
+**Two ways to populate `backend/ai_models/`:**
 
 ```bash
-# One command — sets up everything
-python run.py
+# Full quality (~25 min total on CPU)
+jupyter nbconvert --execute --to notebook --inplace notebooks/*.ipynb
+
+# Or interactively from Jupyter — Run All on each notebook
 ```
 
-That's it. The script will:
-1. Verify Python ≥ 3.10
-2. Create a virtual environment (`.venv/`)
-3. Install all backend dependencies (~60s on first run)
-4. Initialize the SQLite database and seed it with 8 hospitals + 20 ambulances + 1 admin user
-5. Detect ML models — offer to **quick-train them in 90s** if missing
-6. Detect Node.js + run `npm install` for the frontend (~60s on first run)
-7. Start three subprocesses: backend (FastAPI + Socket.IO on `:8000`), GPS simulator, and Vite dev server (`:5173`)
-
-When done you'll have:
-- **Frontend (start here):** http://localhost:5173 — login `admin` / `admin123`
-- **API docs:** http://localhost:8000/docs
-- **Health check:** http://localhost:8000/health
-
-Press **Ctrl-C** to stop everything cleanly.
-
----
-
-## 🧠 The 5 ML models
-
-| # | Model | What it does | Notebook |
-|---|-------|--------------|----------|
-| 1 | **Severity Classifier** | Triages each call into Critical / Serious / Moderate / Minor / Non-Emergency | `notebooks/01_severity_classifier.ipynb` |
-| 2 | **ETA Predictor** | Predicts arrival time given distance, traffic, weather, time-of-day | `notebooks/02_eta_predictor.ipynb` |
-| 3 | **Hospital Recommender** | Scores each hospital for a given patient (specialty, beds, distance, ER wait) | `notebooks/03_hospital_recommender.ipynb` |
-| 4 | **Traffic Predictor** | Forecasts congestion per zone given hour/day/weather | `notebooks/04_traffic_predictor.ipynb` |
-| 5 | **LSTM Hotspot Forecaster** | Forecasts next-24-hour incident counts per zone | `notebooks/05_hotspot_forecaster_lstm.ipynb` |
-
-The dispatch engine in `backend/app/services/dispatch_engine.py` is the only place where all 5 models meaningfully come together.
-
-### Two ways to get trained models
-
-**Option A — Full quality (>95% accuracy):** Open the 5 notebooks and run all cells. Each notebook saves its artifacts directly to `backend/ai_models/`. Total: ~30 minutes.
-
-**Option B — Quick-train fallback (~90s, ~85-92% accuracy):**
 ```bash
-cd backend
-python -m app.ai.quick_train
+# Quick fallback (~90 s) — RandomForest + tiny LSTM
+cd backend && python -m app.ai.quick_train
 ```
-This trains lightweight `RandomForest` + tiny `LSTM` versions of all 5 models. Good for first-run / demo purposes. `run.py` will offer to do this automatically if it detects missing model files.
 
-**Heuristic fallbacks** are built into every prediction method, so the system stays functional even if you skip training entirely. Predictions just use rule-based logic instead of ML.
+If the artifacts are missing, every prediction method has a **rule-based
+heuristic fallback** built in. API responses include `used_fallback: true` so
+the frontend can surface the degraded mode.
 
 ---
 
-## 🗂️ Project structure
+## 4. LLM intake layer
+
+Optional. Converts free-text caller transcripts (English / Hindi / Marathi or
+any mix) into structured intake fields. The local ML ensemble still owns the
+actual triage decision — the LLM only parses unstructured input.
 
 ```
-emergency-response-system/
-├── run.py                          ← single entry point
-├── .env.example                    ← copy → .env (defaults work as-is)
-├── README.md                       ← this file
+transcript ─► services/llm_extractor.py
+                │
+                ├─► Groq    (Llama 3.3 70B, ~700 ms, primary)
+                ├─► Gemini  (gemini-2.5-flash, ~3.6 s, fallback)
+                └─► heuristic regex skim (last-ditch, never raises)
+                │
+                ▼
+          ExtractedEmergency (Pydantic-validated)
+            age, gender, vitals, symptoms (whitelist-filtered),
+            chief_complaint, location_hint, patient_type,
+            severity_hint, language_detected
+```
+
+**Provider selection.** `LLM_PROVIDER_ORDER=groq,gemini` in `.env` (default).
+Groq runs first because it's an order of magnitude faster; Gemini is reserved
+for fallbacks. Set the order to a single provider to disable the other, or
+leave both keys empty to disable LLM extraction entirely (heuristic mode).
+
+**Symptom safety.** LLM output is filtered against the canonical 21-term
+symptom whitelist before reaching the severity model — no surprise free-text
+strings pollute the feature space.
+
+**Endpoint.**
+
+```
+POST /ai/extract
+Body:  { "transcript": "...", "language_hint": "en|hi|mr|null" }
+Returns: { extracted: ExtractedEmergency, provider_used, used_fallback,
+           latency_ms, error }
+```
+
+The Intake page wires this to a "Caller transcript" textarea. Click
+**Auto-fill from transcript** and the form populates with whatever the LLM
+extracted. Existing user input is never overwritten — extracted values only
+fill blanks. The `inferred_patient_type` flows through to dispatch so the
+ML-driven hospital-scoring uses the LLM hint instead of keyword matching.
+
+---
+
+## 5. Dispatch pipeline
+
+The single place where all five ML models meaningfully come together.
+Lives in `backend/app/services/dispatch_engine.py`:
+
+```
+POST /emergencies/{id}/dispatch
+  │
+  1. Triage  ← Severity classifier  (1-5 + confidence)
+  │
+  2. Filter ambulances by required type
+       sev 1-2 → ALS / ICU only
+       sev 3   → BLS / ALS / ICU
+       sev 4-5 → BLS
+  │
+  3. Get current zone congestion  ← Traffic predictor
+  │
+  4. For each candidate ambulance:
+       distance = haversine(amb, emergency)
+       eta      = ETA predictor(distance, congestion, hour, dow, ...)
+     Pick lowest ETA
+  │
+  5. Use emergency.inferred_patient_type if set (LLM-extracted at intake);
+     otherwise infer from symptom keywords
+  │
+  6. For each hospital:
+       score = Hospital recommender(patient_type, h, distance)
+     Pick highest score
+  │
+  7. Persist Dispatch row, mark ambulance EN_ROUTE,
+     mark emergency DISPATCHED, audit-log the decision
+  │
+  8. Emit Socket.IO event: emergency:dispatched
+  │
+Returns DispatchPlan {severity, ambulance_reg, hospital_name, ETA,
+                      distance, fit-score, used_fallback}
+```
+
+---
+
+## 6. Data model
+
+| Table | Purpose | Key fields |
+|---|---|---|
+| `emergencies` | Each call | location, vitals (pulse, BP, SpO₂, GCS, RR), symptoms[], predicted_severity, severity_confidence, inferred_patient_type, status |
+| `ambulances` | Fleet | registration, type (BLS / ALS / ICU_MOBILE), status, current_lat/lng, home_station_*, paramedic info, equipment[] |
+| `hospitals` | Facilities | name, lat/lng, specialties[], bed counts × 5 categories (general, ICU, trauma, pediatric, burns), ER wait, diversion flag, quality rating |
+| `dispatches` | Assignment | emergency_id ↔ ambulance_id ↔ hospital_id, dispatched_at, predicted_eta_seconds, actual_response_time_seconds, hospital_recommendation_score, status |
+| `users` | Auth | username, hashed_password (bcrypt), role |
+| `audit_log` | Decisions trail | timestamp, user_id, action, entity_type, entity_id, details (JSON) |
+| `traffic_snapshots` | Historical congestion | recorded_at, zone_id, congestion_level, avg_speed_kmh, hour_of_day, day_of_week |
+
+Tables auto-create on first run via `Base.metadata.create_all()`. SQLite is
+the default; switching to PostgreSQL is a single `DATABASE_URL` change.
+
+**SQLite tuning** (in `database.py`): WAL journal mode, `busy_timeout=10s`,
+pool size 20 / overflow 40. The simulator pushes ~10 PATCH/sec across the
+fleet — the default 5+10 pool was easy to exhaust under that load.
+
+---
+
+## 7. REST API surface
+
+OpenAPI explorer at `http://localhost:8000/docs`.
+
+**Auth**
+- `POST /auth/login` → JWT
+- `POST /auth/register`
+- `GET  /auth/me`
+
+**Emergencies**
+- `GET   /emergencies` (filterable by status)
+- `POST  /emergencies`
+- `GET   /emergencies/{id}`
+- `POST  /emergencies/{id}/dispatch` — runs the full pipeline
+- `PATCH /emergencies/{id}` — status update
+
+**Ambulances**
+- `GET   /ambulances` (filterable by status)
+- `POST  /ambulances`
+- `PATCH /ambulances/{id}/location` — used by the simulator
+- `PATCH /ambulances/{id}/status`
+
+**Hospitals**
+- `GET   /hospitals`, `POST /hospitals`
+- `PATCH /hospitals/{id}/beds`
+
+**Dispatches**
+- `GET   /dispatches/active`, `GET /dispatches/{id}`
+
+**AI inference**
+- `POST  /ai/triage` — severity + confidence + used_fallback
+- `POST  /ai/eta`, `POST /ai/traffic`
+- `GET   /ai/hotspots`
+- `POST  /ai/extract` — caller transcript → structured intake
+
+**Analytics**
+- `GET   /analytics/kpis`
+- `GET   /analytics/hotspots` — LSTM heatmap data per zone
+
+---
+
+## 8. Real-time channels (Socket.IO at `/socket.io`)
+
+| Channel | Payload |
+|---|---|
+| `ambulance:position` | `{ ambulance_id, lat, lng, status }` — every simulator tick |
+| `ambulance:status_change` | `{ ambulance_id, status }` |
+| `emergency:created` | full intake payload (location, symptoms, …) |
+| `emergency:dispatched` | full DispatchPlan |
+| `hospital:beds_updated` | `{ hospital_id, available_beds_*, … }` |
+
+Handlers in `frontend/src/api/socket.js` mutate the corresponding Zustand
+stores directly, so every page reflects changes without prop drilling.
+
+---
+
+## 9. Frontend
+
+Aesthetic: dark mission-control. JetBrains Mono for IDs and numeric data,
+Manrope for UI. Severity uses a 5-step palette
+(red / orange / amber / cyan / emerald for SEV 1–5).
+
+| Page | URL | What's there |
+|---|---|---|
+| Login | `/login` | JWT auth; defaults pre-filled in dev |
+| Dashboard | `/dashboard` | Live tactical map (Leaflet + dark-filtered OSM tiles), status-coloured ambulance markers, pulsing emergency markers, hospital rings tinted by bed availability, dashed polylines for active dispatches. KPI rail + pending intake queue + active-dispatch rail |
+| Intake | `/intake` | **Caller transcript textarea** with one-click LLM auto-fill (provider/latency/language badge), live AI triage chip (350 ms debounced), 4-tier symptom palette, click-anywhere-on-map to set location. Submit as Create or Create + Dispatch |
+| Fleet | `/ambulances` | Roster with status filters, click a unit to fly the map and inspect crew, certification, depot, last GPS, and active dispatch |
+| Facilities | `/hospitals` | Per-hospital cards with bed bars (general / ICU / trauma / pediatric / burns), ER wait, diversion flag, quality stars. Inline bed-count edit broadcasts via Socket.IO |
+| Analytics | `/analytics` | LSTM hotspot heatmap (12-zone grid coloured by next-24-h forecast) + Recharts bar chart + KPI strip |
+
+Custom Leaflet `divIcon` markers (status-coloured ambulance circles with
+embedded SVGs, pulsing CSS-keyframe emergency rings, hospital rings tied to
+bed counts). OSM tiles get
+`hue-rotate(195deg) invert(0.92) saturate(0.6) brightness(0.85)` for a dark
+theme without paying for a tile provider.
+
+---
+
+## 10. Project layout
+
+```
+RapidEMS/
+├── run.py                           single-command launcher (8 phases)
+├── README.md                        this file
+├── .env.example                     copy → .env (defaults work as-is)
+│
+├── docs/
+│   └── build_guide.md               full architecture spec
 │
 ├── backend/
 │   ├── requirements.txt
-│   ├── ai_models/                  ← .pkl / .keras drop in here
-│   │
+│   ├── ai_models/                   trained .pkl / .keras drop here
+│   ├── tests/test_api.py            pytest end-to-end smoke tests
 │   └── app/
-│       ├── main.py                 ← FastAPI app + Socket.IO mount
-│       ├── config.py               ← Pydantic settings
-│       ├── database.py             ← SQLAlchemy session, auto-create tables
-│       ├── seed.py                 ← demo hospitals + ambulances + admin
-│       │
-│       ├── models/                 ← 7 SQLAlchemy ORM tables
-│       ├── schemas/                ← Pydantic request/response shapes
-│       │
-│       ├── api/                    ← REST endpoints (8 routers)
-│       │   ├── auth.py             POST /auth/login, /auth/register
-│       │   ├── emergencies.py      CRUD + POST /emergencies/{id}/dispatch
-│       │   ├── ambulances.py       CRUD + PATCH /location, /status
-│       │   ├── hospitals.py        CRUD + PATCH /beds
-│       │   ├── dispatches.py       GET /dispatches/active
-│       │   ├── ai.py               raw inference: /ai/triage, /ai/eta, etc.
-│       │   └── analytics.py        /analytics/kpis, /analytics/hotspots
-│       │
+│       ├── main.py                  FastAPI + Socket.IO mount
+│       ├── config.py                pydantic-settings (incl. LLM keys)
+│       ├── database.py              SQLAlchemy engine + WAL pragmas
+│       ├── seed.py                  hospitals, ambulances, admin user
+│       ├── models/                  7 ORM tables
+│       ├── schemas/                 Pydantic request/response
+│       │   └── llm.py               TranscriptIn, ExtractedEmergency
+│       ├── api/                     8 routers (incl. /ai/extract)
 │       ├── services/
-│       │   ├── ai_service.py       ← singleton: loads all 5 models + heuristic fallbacks
-│       │   ├── dispatch_engine.py  ← THE orchestrator
+│       │   ├── ai_service.py        loads 5 ML models + heuristic fallbacks
+│       │   ├── llm_extractor.py     Groq + Gemini transcript parser
+│       │   ├── dispatch_engine.py   the orchestrator
 │       │   ├── auth_service.py
-│       │   └── geo_service.py      ← haversine, zone mapping
-│       │
-│       ├── sockets/sio.py          ← Socket.IO real-time channel
-│       ├── core/
-│       │   ├── security.py         ← JWT + bcrypt
-│       │   ├── logging.py          ← loguru config
-│       │   └── startup_check.py    ← model file detection
-│       └── ai/
-│           └── quick_train.py      ← 90-second fallback training
+│       │   └── geo_service.py
+│       ├── sockets/sio.py
+│       ├── core/                    security, logging, startup_check
+│       └── ai/quick_train.py        90 s fallback ML training
 │
 ├── simulator/
-│   └── gps_simulator.py            ← drives the ambulance fleet
+│   └── gps_simulator.py             drives the 20 ambulances
 │
-├── notebooks/                      ← your 5 model-training notebooks
+├── notebooks/                       5 model-training notebooks
+│   ├── 01_severity_classifier.ipynb
+│   ├── 02_eta_predictor.ipynb
+│   ├── 03_hospital_recommender.ipynb
+│   ├── 04_traffic_predictor.ipynb
+│   ├── 05_hotspot_forecaster_lstm.ipynb
+│   └── README.md
 │
-└── frontend/                       ← Vite + React + Tailwind + Leaflet
-    ├── package.json
-    ├── vite.config.js              ← proxies /auth, /emergencies, /socket.io to :8000
-    ├── tailwind.config.js          ← mission-control palette + animations
+└── frontend/                        Vite + React + Tailwind + Leaflet
+    ├── package.json, vite.config.js, tailwind.config.js
+    ├── index.html
     └── src/
         ├── main.jsx, App.jsx, index.css
-        ├── api/                    ← axios client + Socket.IO wiring
-        ├── store/                  ← Zustand stores (auth, ambulances, hospitals, …)
-        ├── components/             ← Layout, Sidebar, Topbar, MapView, KPICard, …
-        ├── pages/                  ← Login, Dashboard, EmergencyForm, AmbulanceTracking,
-        │                              HospitalAvailability, Analytics
-        └── utils/                  ← format helpers + custom Leaflet divIcons
+        ├── api/                     axios client + Socket.IO wiring
+        │   └── client.js            includes aiApi.extract()
+        ├── store/                   Zustand stores
+        ├── components/              Layout, MapView, KPICard, …
+        ├── pages/                   Login, Dashboard, EmergencyForm, …
+        └── utils/                   format, leaflet icons
 ```
 
 ---
 
-## 🌐 REST API
+## 11. Setup
 
-Visit `http://localhost:8000/docs` for the live OpenAPI explorer. Highlights:
+### Prerequisites
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/health` | Liveness + model file status |
-| POST | `/auth/login` | Issue JWT |
-| GET | `/emergencies` | List recent calls |
-| POST | `/emergencies` | Create a new emergency |
-| **POST** | **`/emergencies/{id}/dispatch`** | **Run the full AI dispatch pipeline** |
-| GET | `/ambulances` | List fleet (with live positions) |
-| PATCH | `/ambulances/{id}/location` | Push GPS update |
-| PATCH | `/ambulances/{id}/status` | Status transition |
-| GET | `/hospitals` | List hospitals (with bed availability) |
-| PATCH | `/hospitals/{id}/beds` | Update bed counts |
-| GET | `/dispatches/active` | What's currently in progress |
-| POST | `/ai/triage` | Raw severity prediction (used by frontend for live triage hints) |
-| POST | `/ai/eta` | Raw ETA prediction |
-| POST | `/ai/traffic` | Raw congestion prediction |
-| GET | `/ai/hotspots` | Forecast for one zone |
-| GET | `/analytics/kpis` | Dashboard counters |
-| GET | `/analytics/hotspots` | Heatmap data for all zones |
+- Python ≥ 3.10
+- Node.js ≥ 18 (only if you want the frontend; backend works without it)
+- Optional: a Groq and/or Gemini API key for transcript extraction
 
-### Example: trigger a full dispatch
+### One command
 
 ```bash
-# 1. Create an emergency
-curl -X POST http://localhost:8000/emergencies -H "Content-Type: application/json" -d '{
-  "patient_age": 55, "patient_gender": "male",
-  "location_lat": 19.07, "location_lng": 72.87,
-  "symptoms": ["chest_pain", "shortness_of_breath"],
-  "pulse_rate": 130, "spo2": 88, "gcs_score": 13
-}'
-# → {"id": 1, ...}
-
-# 2. Dispatch
-curl -X POST http://localhost:8000/emergencies/1/dispatch
-# → {
-#     "severity_level": 2, "severity_label": "Serious",
-#     "inferred_patient_type": "cardiac",
-#     "ambulance_registration": "AMB-1019",
-#     "hospital_name": "Heritage Cardiac Institute",
-#     "predicted_eta_minutes": 4.7, ...
-#   }
+python run.py
 ```
 
----
+The launcher walks 8 phases:
 
-## 📡 Real-time Socket.IO channels
+1. Verify Python ≥ 3.10
+2. Create or reuse `.venv/`
+3. `pip install -r backend/requirements.txt` (cached after first run)
+4. Initialise the SQLite database, run schema, seed data
+5. Detect ML model artifacts; offer to `quick_train` if any are missing
+6. Verify Node + run `npm install` (cached)
+7. Spawn backend (uvicorn :8000) + simulator + Vite (:5173) as subprocesses
+8. Stream their logs; Ctrl-C cleanly stops all three
 
-Connect to `ws://localhost:8000/socket.io/`:
+When done:
 
-| Channel | Payload |
-|---------|---------|
-| `ambulance:position` | `{ ambulance_id, lat, lng, status }` |
-| `ambulance:status_change` | `{ ambulance_id, status }` |
-| `emergency:created` | `{ id, lat, lng, symptoms, ... }` |
-| `emergency:dispatched` | full `DispatchPlan` object |
-| `hospital:beds_updated` | `{ hospital_id, available_beds_*, ... }` |
+- Frontend: <http://localhost:5173>  (login: `admin` / `admin123`)
+- API docs: <http://localhost:8000/docs>
+- Health:   <http://localhost:8000/health>
 
-The frontend subscribes to these for live map updates (see the Frontend tour below).
+### Useful flags
 
----
-
-## 🚦 GPS Simulator
-
-The simulator drives 20 ambulances around the seeded city:
-- **Idle** ambulances wander randomly within ~6 km of their depot.
-- When a dispatch is created, the assigned ambulance switches to **EN_ROUTE** and drives toward the emergency.
-- On arrival → **ON_SCENE** for ~12s → **TRANSPORTING** to the assigned hospital.
-- Hospital handoff (~18s) → **RETURNING** to depot → **AVAILABLE** again.
-
-Run it standalone (e.g., for debugging) with:
 ```bash
-python simulator/gps_simulator.py --backend http://localhost:8000
+python run.py --no-sim         # backend + frontend only
+python run.py --no-frontend    # backend + simulator only
+python run.py --backend-only
+python run.py --setup-only     # set up env / db / models, then exit
+python run.py --skip-install   # faster restart, skips pip + npm install
+python run.py --reset-db       # delete the SQLite db before starting
 ```
 
 ---
 
-## 🛠️ Configuration
+## 12. Configuration
 
-Everything is configured via environment variables. Defaults work — you typically don't need a `.env` file at all. To customize, copy `.env.example` to `.env` and edit. Key settings:
+`.env` (copied from `.env.example` on first run). Defaults work without
+edits; LLM keys are optional.
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `DATABASE_URL` | `sqlite:///./emergency.db` | Switch to `postgresql+psycopg2://...` for Postgres |
-| `SECRET_KEY` | (dev placeholder) | Change in production! |
-| `MODELS_DIR` | `./ai_models` | Where `.pkl`/`.keras` files live |
-| `ALLOW_HEURISTIC_FALLBACK` | `true` | If `false`, missing models cause 500s |
-| `SEED_NUM_AMBULANCES` | `20` | Fleet size |
-| `SEED_NUM_HOSPITALS` | `8` | |
-| `SEED_CITY_LAT` / `SEED_CITY_LNG` | Mumbai | The point everything's seeded around |
-| `CORS_ORIGINS` | `localhost:5173, localhost:3000` | Add your frontend origin if different |
+```ini
+# Database — sqlite by default, switch to postgres with one line
+DATABASE_URL=sqlite:///./emergency.db
+
+# Auth
+SECRET_KEY=change-me-...
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+
+# App
+APP_HOST=0.0.0.0
+APP_PORT=8000
+DEBUG=true
+LOG_LEVEL=INFO
+
+# ML
+MODELS_DIR=./ai_models
+ALLOW_HEURISTIC_FALLBACK=true
+
+# LLM extraction (optional, free tiers)
+# Empty keys = feature disabled, system falls back to heuristic regex skim.
+# Groq:   https://console.groq.com/keys
+# Gemini: https://aistudio.google.com/apikey
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+LLM_PROVIDER_ORDER=groq,gemini
+
+# CORS
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173
+
+# Seed
+SEED_ON_STARTUP=true
+SEED_CITY_LAT=19.0760
+SEED_CITY_LNG=72.8777
+SEED_NUM_AMBULANCES=20
+SEED_NUM_HOSPITALS=8
+
+# Default admin
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+```
 
 ---
 
-## 🧪 Run the tests
+## 13. Tech stack
+
+**Backend (Python 3.10+)**
+- FastAPI 0.115 + Uvicorn (ASGI)
+- SQLAlchemy 2 + SQLite (PostgreSQL-ready) with WAL journal mode
+- Pydantic v2 + pydantic-settings
+- python-socketio 5 (mounted as `socketio.ASGIApp`)
+- python-jose (JWT) + passlib[bcrypt]
+- numpy, pandas, scikit-learn, xgboost, lightgbm, catboost, joblib
+- TensorFlow 2.18 (only for the LSTM; optional)
+- httpx 0.27 (LLM provider HTTP — direct REST, no provider SDKs)
+- loguru for structured logging
+
+**Frontend (Node 18+)**
+- Vite 5 + React 18 + React Router 6
+- Tailwind CSS 3.4 with custom mission-control palette
+- Zustand 4 (one store per resource)
+- React-Leaflet 4.2 + Leaflet 1.9 + OpenStreetMap
+- Socket.IO client 4.7
+- Recharts 2.13
+- Lucide React (icons)
+- Axios with JWT interceptor + auto-401-logout
+
+**LLM providers** (no SDK dependency)
+- Groq REST (OpenAI-compatible chat completions, JSON mode)
+- Google Generative Language v1beta (`generateContent`, `application/json` mime)
+
+**Tooling**
+- pytest 8 (`backend/tests/test_api.py`)
+- jupyter / nbconvert (training notebooks)
+
+---
+
+## 14. Resilience
+
+Built into every layer:
+
+- **Missing ML models** → heuristic rule-based fallbacks per prediction method.
+  API responses report `used_fallback: true` so the UI can surface the
+  degraded mode.
+- **No LLM keys / Groq down** → Gemini retried; if both fail or are
+  unconfigured, a regex skim returns whatever it can. The endpoint never
+  raises.
+- **Missing TensorFlow** → LSTM hotspot path uses heuristic forecast; the
+  rest of the system is unaffected.
+- **Socket.IO disconnect** → the topbar indicator turns red and the
+  dashboard falls back to 8-second REST polling so it never goes stale.
+- **Backend down during simulator startup** → the simulator retries every
+  2 s for up to 60 s before giving up.
+- **JWT expired / invalid** → axios interceptor auto-logs-out and
+  redirects to `/login`.
+- **Unhandled exception in any endpoint** → universal 500 handler returns a
+  JSON body so the frontend can toast it instead of seeing a raw error.
+- **SQLite under load** → WAL mode + `busy_timeout=10s` + pool size 20 /
+  overflow 40 lets the simulator push GPS updates while readers query in
+  parallel without lock contention.
+
+---
+
+## 15. Tests
 
 ```bash
 cd backend
 pytest tests/ -v
 ```
 
-Covers: health check, hospital/ambulance listing, emergency creation, full dispatch pipeline, AI inference, login, KPIs.
+End-to-end smoke tests cover login → list hospitals → create emergency →
+dispatch. The suite uses an in-memory database so it doesn't touch
+`emergency.db`.
 
 ---
 
-## 🐛 Troubleshooting
+## 16. Switching to PostgreSQL
 
-| Symptom | Cause / Fix |
-|---------|-------------|
-| `python run.py` says "Python 3.10+ required" | Install Python 3.10+ from python.org and re-run. |
-| Backend logs many "model file missing" warnings | Run `python -m app.ai.quick_train` from `backend/` (~90s) or run notebooks 1-5. |
-| `pip install` fails on TensorFlow | TF is optional (used only by hotspot LSTM). The system works without it — you'll just get the heuristic hotspot forecast. To skip: comment out the `tensorflow*` lines in `requirements.txt`. |
-| Port 8000 already in use | `python run.py --port 8001` |
-| Want to start fresh | `python run.py --reset-db` (deletes `emergency.db` first) |
-| Want to test backend in isolation | `python run.py --no-sim --no-frontend` (or `--backend-only`) |
-| Backend works but simulator can't reach it | The simulator polls `http://localhost:8000` — adjust with `--backend` if running elsewhere. |
-| `email-validator` rejects your custom admin email | Use a real-looking TLD (e.g. `.com`, `.org`) — `.local` is reserved. |
-| `bcrypt` warns about `__about__` | Cosmetic issue with newer bcrypt + older passlib — safe to ignore. |
-| Frontend can't load — `node` / `npm` not found | Install Node.js 18+ from https://nodejs.org/. The backend + simulator still run without it. |
-| Map tiles don't load on the dashboard | Check internet connectivity to OpenStreetMap (`a.tile.openstreetmap.org`). No API key needed. |
-| Frontend can't talk to backend | Vite dev server proxies `/auth`, `/emergencies`, `/socket.io`, etc. to `:8000` — confirm backend is up at `localhost:8000/health`. |
-| Want a production frontend build | `cd frontend && npm run build` — output goes to `frontend/dist/`. |
+```bash
+pip install psycopg2-binary
+```
 
----
+Edit `.env`:
 
-## 🖥️ Frontend tour
+```
+DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/rapidems
+```
 
-Once `python run.py` is up, visit **http://localhost:5173** and sign in (`admin` / `admin123`). You get a 6-page mission-control console:
-
-| Page | URL | What it does |
-|------|-----|--------------|
-| **Login** | `/login` | Branded split-panel terminal — no SSO, JWT-based |
-| **Console** (Dashboard) | `/dashboard` | Live tactical map + 6 KPI cards + pending intake queue + active dispatches list. Click pending calls to fly the map; press **Dispatch now** to trigger the full AI pipeline. |
-| **Intake** | `/intake` | Caller-intake form with **live AI triage chip** that updates as you type vitals/symptoms (debounced 350ms). Click anywhere on the map to set the incident location. **Create + Dispatch** in one shot. |
-| **Fleet** | `/ambulances` | Ambulance roster with status filters (Available / En Route / On Scene / Transporting). Click a unit to fly the map and see crew, certification, and the active dispatch's ETA + destination. |
-| **Facilities** | `/hospitals` | Per-hospital cards with bed-availability bars (general / ICU / trauma / pediatric / burns), ER wait, diversion flag, quality stars. Inline edit form for hospital staff to update beds & wait times. |
-| **Analytics** | `/analytics` | LSTM hotspot heatmap (next-hour demand per zone), 24-hour bar chart, KPI strip. |
-
-### Real-time channels
-
-The frontend subscribes to all five Socket.IO channels — `ambulance:position`, `ambulance:status_change`, `emergency:created`, `emergency:dispatched`, `hospital:beds_updated`. New emergencies pop a **critical** toast; new dispatches pop an info toast; ambulances move on the map as the simulator drives them. The topbar's **LIVE** indicator pulses green while the socket is connected and turns red on disconnect — the dashboard also has an 8-second polling fallback so it never goes stale.
-
-### Aesthetic & tech notes
-
-- **Visual direction:** mission-control / 911 dispatch console — dark slate base (`#0a0e1a`), JetBrains Mono for IDs and data, Manrope for UI. Severity uses a 5-step signal palette (red / orange / amber / cyan / emerald).
-- **Map:** React-Leaflet + OpenStreetMap, with a CSS filter (`hue-rotate(195deg) invert(.92) saturate(.6) brightness(.85)`) to give the tiles a dark theme without needing a paid tile provider.
-- **Custom markers:** ambulances are status-colored divIcons with embedded SVG; emergencies have a pulsing ring whose intensity tracks predicted severity; hospitals use a ring-color whose hue reflects bed availability.
-- **State:** Zustand (one store per entity type) — Socket.IO handlers mutate the stores directly, so the UI stays consistent across pages without prop drilling.
-- **Bundling:** `npm run build` produces `dist/` ~250 KB gzipped. Vite dev server boots in ~600ms.
-
----
-
-## 📜 License
-
-MIT. Built for hackathon use.
+The SQLite-specific WAL pragmas in `database.py` skip themselves when the URL
+isn't sqlite. Tables auto-create on first start; seed runs once if the
+`users` table is empty.
