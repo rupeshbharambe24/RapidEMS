@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     models_dir: Path = Path("./ai_models")
     allow_heuristic_fallback: bool = True
 
+    # ── LLM extraction (optional) ──
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
+    llm_provider_order: str = "groq,gemini"
+
     # ── CORS ──
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 

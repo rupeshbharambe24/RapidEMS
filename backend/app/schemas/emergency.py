@@ -32,6 +32,13 @@ class EmergencyCreate(EmergencyVitalsBase):
     casualty_count: int = 1
     notes: Optional[str] = None
 
+    # Optional LLM-extracted hint; dispatch engine uses it as-is when present,
+    # otherwise infers from symptoms.
+    inferred_patient_type: Optional[str] = Field(
+        default=None,
+        pattern="^(cardiac|trauma|stroke|pediatric|burns|general)$",
+    )
+
 
 class EmergencyUpdate(BaseModel):
     status: Optional[str] = None

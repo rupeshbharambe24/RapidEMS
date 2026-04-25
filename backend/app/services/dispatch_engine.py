@@ -57,9 +57,13 @@ def dispatch_emergency(db: Session, emergency: Emergency,
     # Persist triage results on the emergency
     emergency.predicted_severity = severity_level
     emergency.severity_confidence = triage["confidence"]
-    patient_type = ai.infer_patient_type(emergency.symptoms or [],
-                                         age=emergency.patient_age)
-    emergency.inferred_patient_type = patient_type
+    # Honor an LLM-set patient_type from intake; only re-infer if blank.
+    if emergency.inferred_patient_type:
+        patient_type = emergency.inferred_patient_type
+    else:
+        patient_type = ai.infer_patient_type(emergency.symptoms or [],
+                                             age=emergency.patient_age)
+        emergency.inferred_patient_type = patient_type
     db.commit()
 
     # ── 2. Filter ambulances by required type ─────────────

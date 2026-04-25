@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends
 from ..schemas.ai import (ETARequest, ETAResponse, HotspotForecast,
                           TrafficRequest, TrafficResponse,
                           TriageRequest, TriageResponse)
+from ..schemas.llm import ExtractionResult, TranscriptIn
 from ..services.ai_service import get_ai_service
+from ..services.llm_extractor import get_llm_extractor
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -38,6 +40,20 @@ def predict_traffic(payload: TrafficRequest, ai=Depends(get_ai_service)):
     out = ai.predict_congestion(**payload.model_dump())
     return TrafficResponse(congestion=out["congestion"],
                            used_fallback=out["used_fallback"])
+
+
+@router.post("/extract", response_model=ExtractionResult)
+async def extract_transcript(payload: TranscriptIn):
+    """Parse a free-text caller transcript into structured intake fields.
+
+    Returns the parsed payload plus metadata about which provider answered and
+    whether a fallback was used. The dispatcher UI uses this to pre-fill the
+    intake form; nothing is persisted here.
+    """
+    extractor = get_llm_extractor()
+    parsed, meta = await extractor.extract(payload.transcript,
+                                           language_hint=payload.language_hint)
+    return ExtractionResult(extracted=parsed, **meta)
 
 
 @router.get("/hotspots", response_model=HotspotForecast)
