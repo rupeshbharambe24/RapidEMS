@@ -1,0 +1,41 @@
+"""Pydantic schemas for the Dispatch resource."""
+from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
+
+class DispatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    emergency_id: int
+    ambulance_id: int
+    hospital_id: int
+    dispatched_at: datetime
+    arrived_on_scene_at: Optional[datetime] = None
+    departed_scene_at: Optional[datetime] = None
+    arrived_hospital_at: Optional[datetime] = None
+    predicted_eta_seconds: int
+    distance_meters: float
+    hospital_recommendation_score: float
+    status: str
+
+
+class DispatchPlan(BaseModel):
+    """Returned when the dispatch engine assigns a unit + hospital."""
+    dispatch_id: int
+    emergency_id: int
+    ambulance_id: int
+    ambulance_registration: str
+    hospital_id: int
+    hospital_name: str
+    predicted_eta_seconds: int
+    predicted_eta_minutes: float
+    distance_km: float
+    hospital_score: float
+    severity_level: int
+    severity_label: str
+    severity_confidence: float
+    inferred_patient_type: str
+    used_fallback: bool = False
+    notes: Optional[str] = None
