@@ -131,10 +131,10 @@ def phase_install(total, skip: bool):
         return
     info("running pip install (first run takes ~60s) ...")
     subprocess.run(
-        [str(PIP_BIN), "install", "-q", "--upgrade", "pip"], check=True,
+        [str(PY_BIN), "-m", "pip", "install", "-q", "--upgrade", "pip"], check=True,
     )
     res = subprocess.run(
-        [str(PIP_BIN), "install", "-q", "-r", str(REQS)],
+        [str(PY_BIN), "-m", "pip", "install", "-q", "-r", str(REQS)],
         check=False,
     )
     if res.returncode != 0:
