@@ -14,6 +14,9 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Environment
 .env
@@ -36,3 +39,18 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Notebook side-effects
+backend/.nb-cache/
+notebooks/models/
+notebooks/reports/
+notebooks/catboost_info/
+.ipynb_checkpoints/
+
+# Windows / git-bash crash dumps
+*.stackdump
