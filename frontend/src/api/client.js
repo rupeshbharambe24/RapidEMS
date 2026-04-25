@@ -69,6 +69,8 @@ export const aiApi = {
   eta:      (payload) => api.post('/ai/eta',     payload).then(r => r.data),
   traffic:  (payload) => api.post('/ai/traffic', payload).then(r => r.data),
   hotspot:  (zone_id) => api.get('/ai/hotspots', { params: { zone_id } }).then(r => r.data),
+  extract:  (transcript, language_hint) =>
+    api.post('/ai/extract', { transcript, language_hint }).then(r => r.data),
 }
 
 // ─────────── Analytics ───────────

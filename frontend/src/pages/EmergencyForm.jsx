@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMapEvents, useMap } from 'react-leaflet'
-import { Activity, Send, Sparkles, MapPin, Loader2 } from 'lucide-react'
+import { Activity, Send, Sparkles, MapPin, Loader2, MessageSquareText, Wand2 } from 'lucide-react'
 
 import MapView from '../components/MapView.jsx'
 import { SeverityPill } from '../components/StatusBadge.jsx'
@@ -51,6 +51,7 @@ const initial = {
   pulse_rate: '', blood_pressure_systolic: '', blood_pressure_diastolic: '',
   respiratory_rate: '', spo2: '', gcs_score: '',
   symptoms: [],
+  inferred_patient_type: '',
 }
 
 export default function EmergencyForm() {
@@ -64,6 +65,11 @@ export default function EmergencyForm() {
   const [triage, setTriage] = useState(null)
   const [triageBusy, setTriageBusy] = useState(false)
   const debounceRef = useRef(null)
+
+  // LLM transcript extraction
+  const [transcript, setTranscript] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [extractMeta, setExtractMeta] = useState(null)
 
   const triagePayload = useMemo(() => ({
     age: parseInt(form.patient_age) || 40,
@@ -103,6 +109,48 @@ export default function EmergencyForm() {
     setForm(f => ({ ...f,
       symptoms: f.symptoms.includes(s) ? f.symptoms.filter(x => x !== s) : [...f.symptoms, s]
     }))
+  }
+
+  // Parse a free-text caller transcript into form fields. Existing user input
+  // always wins — extracted values only fill blanks.
+  async function extractFromTranscript() {
+    if (!transcript.trim()) return
+    setExtracting(true)
+    try {
+      const resp = await aiApi.extract(transcript.trim())
+      const x = resp.extracted || {}
+      const fill = (cur, val) => (cur !== '' && cur !== undefined && cur !== null) ? cur : (val ?? '')
+      setForm(f => ({
+        ...f,
+        patient_age:               fill(f.patient_age, x.patient_age),
+        patient_gender:            f.patient_gender !== 'male' ? f.patient_gender : (x.patient_gender || f.patient_gender),
+        pulse_rate:                fill(f.pulse_rate, x.pulse_rate),
+        blood_pressure_systolic:   fill(f.blood_pressure_systolic, x.blood_pressure_systolic),
+        blood_pressure_diastolic:  fill(f.blood_pressure_diastolic, x.blood_pressure_diastolic),
+        respiratory_rate:          fill(f.respiratory_rate, x.respiratory_rate),
+        spo2:                      fill(f.spo2, x.spo2),
+        gcs_score:                 fill(f.gcs_score, x.gcs_score),
+        chief_complaint:           f.chief_complaint || x.chief_complaint || '',
+        location_address:          f.location_address || x.location_hint || '',
+        symptoms:                  Array.from(new Set([...f.symptoms, ...(x.symptoms || [])])),
+        inferred_patient_type:     x.patient_type || f.inferred_patient_type,
+      }))
+      setExtractMeta({
+        provider: resp.provider_used,
+        latency: resp.latency_ms,
+        used_fallback: resp.used_fallback,
+        language: x.language_detected,
+        severity_hint: x.severity_hint,
+        patient_type: x.patient_type,
+        error: resp.error,
+      })
+      const tag = resp.used_fallback ? 'heuristic fallback' : `via ${resp.provider_used}`
+      toast(`Transcript parsed (${tag})`, resp.used_fallback ? 'info' : 'success')
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Extraction failed', 'critical')
+    } finally {
+      setExtracting(false)
+    }
   }
 
   async function submit(e, alsoDispatch = false) {
@@ -146,6 +194,60 @@ export default function EmergencyForm() {
             <h1 className="text-2xl font-bold">Report Emergency</h1>
             <p className="text-sm text-slate-400 mt-1">Click on the map to set the incident location. The AI will triage in real time as you fill vitals and symptoms.</p>
           </div>
+
+          {/* Caller transcript -> auto-fill */}
+          <Section title="Caller transcript" icon={MessageSquareText}>
+            <div className="text-[10px] text-slate-500 mb-1.5">
+              Type or paste what the caller is saying — English, Hindi, or Marathi. The
+              AI extracts vitals, symptoms, and a patient-type hint into the form below.
+            </div>
+            <textarea
+              className="field min-h-[80px] resize-y font-normal leading-relaxed"
+              value={transcript}
+              onChange={e => setTranscript(e.target.value)}
+              placeholder="e.g. 60yo male, severe chest pain past 25 min, sweating, near gateway of india"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={extractFromTranscript}
+                disabled={extracting || !transcript.trim()}
+                className="btn-ghost flex-1 disabled:opacity-40"
+              >
+                {extracting
+                  ? <><Loader2 className="w-4 h-4 animate-spin"/> Parsing…</>
+                  : <><Wand2 className="w-4 h-4"/> Auto-fill from transcript</>}
+              </button>
+              {transcript && (
+                <button
+                  type="button"
+                  onClick={() => { setTranscript(''); setExtractMeta(null) }}
+                  className="btn-ghost px-3 text-slate-400 text-xs"
+                >Clear</button>
+              )}
+            </div>
+            {extractMeta && (
+              <div className={`mt-2 p-2 rounded border text-[10px] font-mono leading-relaxed
+                  ${extractMeta.used_fallback
+                    ? 'bg-amber-500/5 border-amber-500/30 text-amber-300'
+                    : 'bg-emerald-500/5 border-emerald-500/30 text-emerald-300'}`}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span>provider: {extractMeta.provider || '—'}</span>
+                  <span>{extractMeta.latency ? `${extractMeta.latency}ms` : ''}</span>
+                </div>
+                <div className="text-slate-300/80">
+                  {extractMeta.language && <>lang={extractMeta.language} · </>}
+                  {extractMeta.patient_type && <>type={extractMeta.patient_type} · </>}
+                  {extractMeta.severity_hint && <>sev hint={extractMeta.severity_hint}</>}
+                </div>
+                {extractMeta.used_fallback && (
+                  <div className="mt-1 text-amber-200/70">
+                    Heuristic mode — set GROQ_API_KEY in .env for full LLM extraction.
+                  </div>
+                )}
+              </div>
+            )}
+          </Section>
 
           {/* Live triage banner */}
           <div className={`card p-3 transition-all relative overflow-hidden ${
