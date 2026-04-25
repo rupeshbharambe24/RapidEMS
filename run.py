@@ -129,12 +129,12 @@ def phase_install(total, skip: bool):
     if not needs_install:
         ok("dependencies already up to date")
         return
-    info("running pip install (first run takes ~60s) ...")
+    info("running pip install (TensorFlow alone is ~600MB; first run can take several minutes) ...")
     subprocess.run(
-        [str(PY_BIN), "-m", "pip", "install", "-q", "--upgrade", "pip"], check=True,
+        [str(PY_BIN), "-m", "pip", "install", "--upgrade", "pip"], check=True,
     )
     res = subprocess.run(
-        [str(PY_BIN), "-m", "pip", "install", "-q", "-r", str(REQS)],
+        [str(PY_BIN), "-m", "pip", "install", "-r", str(REQS)],
         check=False,
     )
     if res.returncode != 0:
