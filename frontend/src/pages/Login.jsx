@@ -19,7 +19,7 @@ export default function Login() {
     try {
       const r = await authApi.login(username, password)
       login(r.access_token, r.user)
-      nav('/dashboard')
+      nav(r.user?.role === 'patient' ? '/patient' : '/dashboard')
     } catch (e) {
       setErr(e?.response?.data?.detail || 'Authentication failed')
     } finally { setBusy(false) }

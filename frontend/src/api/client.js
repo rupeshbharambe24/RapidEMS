@@ -79,6 +79,34 @@ export const analyticsApi = {
   hotspots: (n_zones=12)        => api.get('/analytics/hotspots', { params: { n_zones } }).then(r => r.data),
 }
 
+// ─────────── Patient ───────────
+export const patientApi = {
+  myProfile:        ()         => api.get('/patient/me').then(r => r.data),
+  createProfile:    (payload)  => api.post('/patient/me', payload).then(r => r.data),
+  updateProfile:    (payload)  => api.patch('/patient/me', payload).then(r => r.data),
+  listRecords:      ()         => api.get('/patient/records').then(r => r.data),
+  uploadRecord:     (file, recordType, description) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('record_type', recordType)
+    fd.append('description', description || '')
+    return api.post('/patient/records', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  deleteRecord:     (id)       => api.delete(`/patient/records/${id}`).then(r => r.data),
+  downloadRecordUrl:(id)       => `/patient/records/${id}/download`,
+  raiseSos:         (payload)  => api.post('/patient/sos', payload).then(r => r.data),
+  activeEmergency:  ()         => api.get('/patient/active-emergency').then(r => r.data),
+}
+
+// ─────────── Routing ───────────
+export const routingApi = {
+  preview: (from_lat, from_lng, to_lat, to_lng) =>
+    api.get('/routing/preview',
+      { params: { from_lat, from_lng, to_lat, to_lng } }).then(r => r.data),
+}
+
 // ─────────── Health ───────────
 export const healthApi = () => api.get('/health').then(r => r.data)
 

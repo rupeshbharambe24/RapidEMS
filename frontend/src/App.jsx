@@ -10,6 +10,7 @@ import EmergencyForm from './pages/EmergencyForm.jsx'
 import AmbulanceTracking from './pages/AmbulanceTracking.jsx'
 import HospitalAvailability from './pages/HospitalAvailability.jsx'
 import Analytics from './pages/Analytics.jsx'
+import PatientDashboard from './pages/PatientDashboard.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -27,6 +28,12 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
 
+      {/* Patient surface — own chrome, no dispatcher sidebar */}
+      <Route path="/patient" element={
+        <ProtectedRoute><PatientDashboard /></ProtectedRoute>
+      }/>
+
+      {/* Dispatcher / clinical / admin surface */}
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/"           element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard"  element={<Dashboard />} />
