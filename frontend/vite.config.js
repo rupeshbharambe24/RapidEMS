@@ -24,6 +24,7 @@ export default defineConfig({
       '/routing':       { target: 'http://localhost:8000', changeOrigin: true },
       '/notifications': { target: 'http://localhost:8000', changeOrigin: true },
       '/track-api':     { target: 'http://localhost:8000', changeOrigin: true },
+      '/copilot':       { target: 'http://localhost:8000', changeOrigin: true },
       '/socket.io':     { target: 'http://localhost:8000', changeOrigin: true, ws: true },
     },
   },

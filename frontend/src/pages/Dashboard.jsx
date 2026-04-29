@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Truck, Building2, AlertTriangle, Activity, Bed, TimerReset, Plus, Send, Wand2, Loader2, X } from 'lucide-react'
+import { Truck, Building2, AlertTriangle, Activity, Bed, TimerReset, Plus, Send, Wand2, Loader2, X, Sparkles } from 'lucide-react'
 
 import MapView from '../components/MapView.jsx'
 import KPICard from '../components/KPICard.jsx'
+import CopilotPanel from '../components/CopilotPanel.jsx'
 import { AmbStatusPill, EmergencyStatusPill, SeverityPill } from '../components/StatusBadge.jsx'
 
 import { analyticsApi, emergenciesApi, dispatchesApi } from '../api/client.js'
@@ -28,6 +29,21 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState(null)
   const [flyTo, setFlyTo] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [copilotOpen, setCopilotOpen] = useState(false)
+
+  // Global '/' shortcut to open the copilot. Skips when the user is typing
+  // in an input / textarea so it doesn't hijack form fields.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key !== '/') return
+      const tag = (e.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return
+      e.preventDefault()
+      setCopilotOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Initial load
   useEffect(() => {
@@ -220,6 +236,21 @@ export default function Dashboard() {
           })}
         </div>
       </div>
+
+      {/* Copilot launcher — bottom-right, always visible */}
+      <button
+        onClick={() => setCopilotOpen(true)}
+        className="fixed bottom-5 right-5 z-30 px-3.5 py-2.5 rounded-full
+                   bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40
+                   text-amber-200 shadow-2xl backdrop-blur transition-all
+                   flex items-center gap-2"
+        title="Ask the copilot (/)"
+      >
+        <Sparkles className="w-4 h-4"/>
+        <span className="text-xs font-mono uppercase tracking-wider hidden sm:inline">copilot</span>
+        <kbd className="hidden sm:inline-flex items-center px-1 py-0.5 rounded border border-amber-400/30 text-[10px] font-mono">/</kbd>
+      </button>
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)}/>
 
       {/* Multi-emergency optimisation preview */}
       {optPreview && (

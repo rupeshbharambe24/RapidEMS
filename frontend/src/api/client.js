@@ -140,6 +140,12 @@ export const adminApi = {
                                           { user_id: userId }).then(r => r.data),
 }
 
+// ─────────── Copilot ───────────
+export const copilotApi = {
+  ask: (query, context) =>
+    api.post('/copilot/ask', { query, context }).then(r => r.data),
+}
+
 // ─────────── Notifications ───────────
 export const notificationsApi = {
   capabilities: ()           => api.get('/notifications/capabilities').then(r => r.data),
