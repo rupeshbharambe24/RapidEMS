@@ -1,8 +1,8 @@
 """Ambulance fleet records."""
 import enum
 from datetime import datetime
-from sqlalchemy import (Boolean, Column, DateTime, Float, Integer, JSON,
-                        String)
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+                        JSON, String)
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -45,6 +45,11 @@ class Ambulance(Base):
     paramedic_name = Column(String(100))
     paramedic_phone = Column(String(20))
     paramedic_certification = Column(String(50))
+
+    # Paramedic user account currently signed in to this unit (1:1).
+    # Phase 0.5 — driver dashboard reads its assignment from here.
+    assigned_user_id = Column(Integer, ForeignKey("users.id"),
+                              nullable=True, unique=True, index=True)
 
     # Equipment + maintenance
     equipment = Column(JSON, default=list)

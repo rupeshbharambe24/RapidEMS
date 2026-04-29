@@ -107,6 +107,15 @@ export const routingApi = {
       { params: { from_lat, from_lng, to_lat, to_lng } }).then(r => r.data),
 }
 
+// ─────────── Driver / paramedic ───────────
+export const driverApi = {
+  me:        ()              => api.get('/driver/me').then(r => r.data),
+  claim:     (ambId)         => api.post(`/driver/claim/${ambId}`).then(r => r.data),
+  release:   ()              => api.post('/driver/release').then(r => r.data),
+  advance:   (target = null) => api.patch('/driver/status', { target }).then(r => r.data),
+  pushGps:   (lat, lng)      => api.patch('/driver/location', { lat, lng }).then(r => r.data),
+}
+
 // ─────────── Health ───────────
 export const healthApi = () => api.get('/health').then(r => r.data)
 

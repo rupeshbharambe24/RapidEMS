@@ -11,6 +11,7 @@ import AmbulanceTracking from './pages/AmbulanceTracking.jsx'
 import HospitalAvailability from './pages/HospitalAvailability.jsx'
 import Analytics from './pages/Analytics.jsx'
 import PatientDashboard from './pages/PatientDashboard.jsx'
+import AmbulanceDriverDashboard from './pages/AmbulanceDriverDashboard.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -31,6 +32,11 @@ export default function App() {
       {/* Patient surface — own chrome, no dispatcher sidebar */}
       <Route path="/patient" element={
         <ProtectedRoute><PatientDashboard /></ProtectedRoute>
+      }/>
+
+      {/* Paramedic / driver surface — full-screen map, no dispatcher sidebar */}
+      <Route path="/driver" element={
+        <ProtectedRoute><AmbulanceDriverDashboard /></ProtectedRoute>
       }/>
 
       {/* Dispatcher / clinical / admin surface */}
