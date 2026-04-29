@@ -57,3 +57,28 @@ class HotspotForecast(BaseModel):
     zone_id: int
     next_24h: List[float]
     used_fallback: bool
+
+
+# ── Triage explanation (Phase 1.5) ────────────────────────────────────────
+class ExplainRequest(BaseModel):
+    """Either an emergency_id (server loads from DB) or an explicit feature
+    snapshot. Exactly one of emergency_id / inline must be supplied."""
+    emergency_id: Optional[int] = None
+    inline: Optional[TriageRequest] = None
+
+
+class FeatureFactor(BaseModel):
+    name: str
+    value: Optional[str] = None
+    impact: str       # 'critical' | 'serious' | 'moderate' | 'normal' | 'protective'
+    note: str
+
+
+class ExplainResponse(BaseModel):
+    severity_level: int
+    severity_label: str
+    confidence: float
+    factors: List[FeatureFactor]
+    narrative: str
+    provider: str       # 'groq' | 'gemini' | 'template'
+    used_fallback: bool
