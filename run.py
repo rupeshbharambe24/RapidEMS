@@ -152,12 +152,17 @@ def phase_db(total, reset: bool):
     if reset and db_file.exists():
         db_file.unlink()
         warn(f"deleted existing {db_file.name}")
-    # Run a tiny in-process check to call create_all_tables + seed
+    # Async tables + seed (Phase 0.2). Runs in a child process so its
+    # asyncio loop doesn't conflict with run.py's own.
     code = (
-        "import sys; sys.path.insert(0, '.');"
-        "from app.database import create_all_tables; create_all_tables();"
-        "from app.database import SessionLocal; from app.seed import seed_database;"
-        "db = SessionLocal(); seed_database(db); db.close();"
+        "import sys, asyncio; sys.path.insert(0, '.');"
+        "from app.database import create_all_tables, AsyncSessionLocal;"
+        "from app.seed import seed_database;"
+        "async def _go():\n"
+        "    await create_all_tables()\n"
+        "    async with AsyncSessionLocal() as db:\n"
+        "        await seed_database(db)\n"
+        "asyncio.run(_go());"
         "print('   db ready')"
     )
     res = subprocess.run([str(PY_BIN), "-c", code], cwd=str(BACKEND))
