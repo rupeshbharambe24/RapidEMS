@@ -82,3 +82,18 @@ async def create_all_tables():
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def init_and_seed() -> None:
+    """One-call helper for the launcher: create tables, then seed.
+
+    Lives here so ``run.py`` can drive it via a single-line
+    ``python -c "import asyncio; from app.database import init_and_seed;
+    asyncio.run(init_and_seed())"`` (which avoids ``python -c`` not
+    accepting multi-line ``async def`` bodies).
+    """
+    from .seed import seed_database
+
+    await create_all_tables()
+    async with AsyncSessionLocal() as db:
+        await seed_database(db)

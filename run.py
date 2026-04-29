@@ -156,13 +156,8 @@ def phase_db(total, reset: bool):
     # asyncio loop doesn't conflict with run.py's own.
     code = (
         "import sys, asyncio; sys.path.insert(0, '.');"
-        "from app.database import create_all_tables, AsyncSessionLocal;"
-        "from app.seed import seed_database;"
-        "async def _go():\n"
-        "    await create_all_tables()\n"
-        "    async with AsyncSessionLocal() as db:\n"
-        "        await seed_database(db)\n"
-        "asyncio.run(_go());"
+        "from app.database import init_and_seed;"
+        "asyncio.run(init_and_seed());"
         "print('   db ready')"
     )
     res = subprocess.run([str(PY_BIN), "-c", code], cwd=str(BACKEND))
