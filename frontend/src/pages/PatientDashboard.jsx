@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle, Heart, FileText, Upload, Trash2, MapPin, Phone,
   ShieldAlert, Loader2, LogOut, Activity, Clock, CheckCircle2,
+  Bell, Send, Mail, MessageCircle, ExternalLink, Plus, X,
 } from 'lucide-react'
 
-import { patientApi } from '../api/client.js'
+import { patientApi, notificationsApi } from '../api/client.js'
 import { useAuthStore } from '../store/auth.js'
 import { useUiStore } from '../store/ui.js'
 
@@ -321,6 +322,9 @@ export default function PatientDashboard() {
           )}
         </section>
 
+        {/* Notifications */}
+        <NotificationsCard/>
+
         {/* Medical records */}
         <section className="card p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -383,6 +387,197 @@ export default function PatientDashboard() {
     </div>
   )
 }
+
+// ── Notifications card ─────────────────────────────────────────────────────
+function NotificationsCard() {
+  const toast = useUiStore(s => s.toast)
+  const [caps, setCaps] = useState(null)
+  const [subs, setSubs] = useState([])
+  const [adding, setAdding] = useState(null)   // 'telegram' | 'email' | null
+  const [draft, setDraft] = useState({ target: '', label: '' })
+  const [busy, setBusy] = useState(false)
+
+  async function refresh() {
+    try {
+      const [c, s] = await Promise.all([
+        notificationsApi.capabilities(), notificationsApi.list(),
+      ])
+      setCaps(c); setSubs(s)
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Notifications load failed', 'critical')
+    }
+  }
+  useEffect(() => { refresh() }, [])
+
+  async function add(e) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await notificationsApi.add({
+        channel: adding, target: draft.target.trim(), label: draft.label || null,
+      })
+      setAdding(null); setDraft({ target: '', label: '' })
+      refresh()
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Add failed', 'critical')
+    } finally { setBusy(false) }
+  }
+
+  async function test(id) {
+    try {
+      await notificationsApi.test(id)
+      toast('Test message sent', 'success')
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Test failed', 'critical')
+      refresh()  // pick up last_error
+    }
+  }
+
+  async function remove(id) {
+    if (!confirm('Remove this channel? You will stop getting notifications here.')) return
+    try {
+      await notificationsApi.remove(id)
+      refresh()
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Remove failed', 'critical')
+    }
+  }
+
+  if (!caps) return null
+
+  return (
+    <section className="card p-6">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <Bell className="w-5 h-5 text-amber-300"/>
+          <h2 className="text-xl font-bold">Notifications</h2>
+        </div>
+        <div className="flex gap-2">
+          <button disabled={!caps.telegram}
+                  title={caps.telegram ? '' : 'Telegram not configured on the server'}
+                  onClick={() => { setAdding('telegram'); setDraft({ target: '', label: '' }) }}
+                  className="btn-ghost text-xs disabled:opacity-40">
+            <MessageCircle className="w-3.5 h-3.5"/>add Telegram
+          </button>
+          <button disabled={!caps.email}
+                  title={caps.email ? '' : 'Email not configured on the server'}
+                  onClick={() => { setAdding('email'); setDraft({ target: '', label: '' }) }}
+                  className="btn-ghost text-xs disabled:opacity-40">
+            <Mail className="w-3.5 h-3.5"/>add email
+          </button>
+        </div>
+      </div>
+
+      {!caps.telegram && !caps.email && !caps.sms_twilio && (
+        <div className="text-xs text-amber-300/80 mb-3">
+          No notification channels are configured on the server yet — set
+          <span className="font-mono mx-1">TELEGRAM_BOT_TOKEN</span> or
+          <span className="font-mono mx-1">SMTP_*</span> in <span className="font-mono">.env</span>.
+        </div>
+      )}
+
+      {/* Add dialog */}
+      {adding && (
+        <form onSubmit={add} className="card p-4 mb-4 space-y-3 border-amber-400/30">
+          {adding === 'telegram' ? (
+            <>
+              <div className="text-sm">
+                <div className="font-semibold mb-1">Link Telegram</div>
+                <ol className="text-xs text-slate-400 list-decimal list-inside space-y-1">
+                  <li>
+                    Message <a className="text-cyan-300 hover:underline"
+                        href="https://t.me/userinfobot" target="_blank" rel="noreferrer">
+                      @userinfobot <ExternalLink className="w-3 h-3 inline"/>
+                    </a> on Telegram. It replies with your <span className="font-mono">Id</span>.
+                  </li>
+                  {caps.telegram_bot_username && (
+                    <li>
+                      Open the RapidEMS bot:&nbsp;
+                      <a className="text-cyan-300 hover:underline"
+                         href={`https://t.me/${caps.telegram_bot_username}?start=link`}
+                         target="_blank" rel="noreferrer">
+                        @{caps.telegram_bot_username} <ExternalLink className="w-3 h-3 inline"/>
+                      </a> and tap Start.
+                    </li>
+                  )}
+                  <li>Paste the numeric Id below and Save.</li>
+                </ol>
+              </div>
+              <Field label="Telegram chat ID">
+                <input className="field font-mono" required pattern="-?\d+"
+                       placeholder="e.g. 123456789"
+                       value={draft.target}
+                       onChange={e => setDraft({ ...draft, target: e.target.value })}/>
+              </Field>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-semibold">Add email address</div>
+              <Field label="Email">
+                <input type="email" className="field" required
+                       value={draft.target}
+                       onChange={e => setDraft({ ...draft, target: e.target.value })}/>
+              </Field>
+            </>
+          )}
+          <Field label="Label (optional)">
+            <input className="field" placeholder="e.g. me, my dad"
+                   value={draft.label}
+                   onChange={e => setDraft({ ...draft, label: e.target.value })}/>
+          </Field>
+          <div className="flex gap-2">
+            <button type="submit" disabled={busy} className="btn-danger flex-1">
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" onClick={() => setAdding(null)}
+                    className="btn-ghost px-4">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      {/* List */}
+      <div className="divide-y divide-line/40">
+        {subs.length === 0 && (
+          <div className="text-sm text-slate-500 py-3">
+            No channels yet. Add Telegram or email to get live updates when help is dispatched.
+          </div>
+        )}
+        {subs.map(s => (
+          <div key={s.id} className="py-3 flex items-center gap-3">
+            <ChannelIcon channel={s.channel}/>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm flex items-center gap-2">
+                <span className="font-mono truncate">{s.target}</span>
+                {s.label && <span className="text-xs text-slate-500">· {s.label}</span>}
+              </div>
+              <div className="text-[10px] text-slate-500 mt-0.5">
+                {s.channel}
+                {s.last_used_at && <> · last sent {new Date(s.last_used_at).toLocaleString()}</>}
+                {s.last_error && (
+                  <span className="text-red-400"> · err: {s.last_error.slice(0, 60)}</span>
+                )}
+              </div>
+            </div>
+            <button onClick={() => test(s.id)} className="btn-ghost text-xs">
+              <Send className="w-3.5 h-3.5"/>test
+            </button>
+            <button onClick={() => remove(s.id)} className="btn-ghost text-xs text-red-300">
+              <Trash2 className="w-3.5 h-3.5"/>
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ChannelIcon({ channel }) {
+  if (channel === 'telegram') return <MessageCircle className="w-4 h-4 text-cyan-300"/>
+  if (channel === 'email')    return <Mail className="w-4 h-4 text-emerald-300"/>
+  if (channel === 'sms')      return <Phone className="w-4 h-4 text-amber-300"/>
+  return <Bell className="w-4 h-4 text-slate-400"/>
+}
+
 
 // ── small helpers ──
 function Field({ label, children, wide }) {

@@ -48,6 +48,24 @@ class Settings(BaseSettings):
     # Blend weight for road ETA vs ML ETA when both are available.
     eta_road_weight: float = 0.7
 
+    # ── Notifications (all optional, all free tier) ──
+    # Telegram bot — talk to @BotFather to make one. Recipients must /start
+    # the bot once, then their chat_id can receive sendMessage calls.
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = ""    # without the @ ; for the deep-link CTA
+    # SMTP — Gmail "App passwords" or SendGrid free tier (100/day) work.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from: str = ""
+    smtp_from_name: str = "RapidEMS"
+    # Twilio (paid, optional). Only enabled when both keys are set.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
     # ── CORS ──
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
