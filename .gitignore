@@ -52,5 +52,8 @@ notebooks/reports/
 notebooks/catboost_info/
 .ipynb_checkpoints/
 
+# Patient uploads (per-user PHI; never goes in git)
+backend/uploads/
+
 # Windows / git-bash crash dumps
 *.stackdump

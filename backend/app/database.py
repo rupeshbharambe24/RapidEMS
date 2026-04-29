@@ -79,8 +79,9 @@ async def create_all_tables():
     """
     # Importing the model modules registers them with Base.metadata.
     from .models import (  # noqa: F401
-        ambulance, audit_log, dispatch, emergency, hospital,
-        traffic_snapshot, user,
+        ambulance, audit_log, dispatch, emergency, family_link, hospital,
+        hospital_alert, medical_record, patient_profile, traffic_snapshot,
+        user,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
