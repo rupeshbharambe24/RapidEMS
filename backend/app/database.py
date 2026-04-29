@@ -5,6 +5,8 @@ The dev path uses ``sqlite+aiosqlite``; the prod path uses ``postgresql+asyncpg`
 written against the sync drivers (``sqlite:///`` / ``postgresql+psycopg2://``)
 keep working.
 """
+import asyncio
+
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
@@ -84,8 +86,26 @@ async def create_all_tables():
         await conn.run_sync(Base.metadata.create_all)
 
 
+def _apply_alembic_upgrade() -> None:
+    """Run ``alembic upgrade head`` against the configured DSN.
+
+    Synchronous because Alembic drives its own asyncio loop in env.py; we
+    invoke it from a worker thread (via ``asyncio.to_thread``) so the
+    launcher's loop isn't reused.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    backend_dir = Path(__file__).resolve().parent.parent
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_dir / "migrations"))
+    command.upgrade(cfg, "head")
+
+
 async def init_and_seed() -> None:
-    """One-call helper for the launcher: create tables, then seed.
+    """One-call helper for the launcher: migrate to head, then seed.
 
     Lives here so ``run.py`` can drive it via a single-line
     ``python -c "import asyncio; from app.database import init_and_seed;
@@ -94,6 +114,8 @@ async def init_and_seed() -> None:
     """
     from .seed import seed_database
 
-    await create_all_tables()
+    # Alembic env.py runs its own asyncio.run() — keep it off our loop.
+    await asyncio.to_thread(_apply_alembic_upgrade)
+
     async with AsyncSessionLocal() as db:
         await seed_database(db)
