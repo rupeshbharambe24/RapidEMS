@@ -387,20 +387,24 @@ Week 5-6 ─► Phase 3 leapfrog features (each one independent)
 
 ---
 
-## Decision points the user should decide before Week 2
+## Locked-in choices (free tier only)
 
-1. **Hosting target**: Render / Fly.io / AWS? Determines Phase 2.6 / 2.8
-   shape.
-2. **Real or simulated SMS / WhatsApp at demo time**: Twilio costs ~$0.01
-   per SMS. WhatsApp Business is paid + needs approval (1-3 weeks).
-3. **Real Google Routes / Mapbox key now, or rely on free OSRM tier**:
-   affects Phase 0.1 / 1.1 cost and timing.
-4. **Real OpenAI for ER briefing, or stick to Groq**: Groq doesn't currently
-   host a strong medical-summary model; Gemini does. Could run ER briefings
-   on Gemini and intake on Groq — consistent with the speed-vs-quality
-   split we already have.
-5. **MCI mode (Phase 3.3): include in scope, or future**: it's the most
-   demo-impactful Phase-3 item but also the most complex.
+1. **Hosting**: Render web service (backend) + Render static site
+   (frontend) + **Neon Postgres** (persistent free tier, replaces Render's
+   90-day-expiring free DB). All free.
+2. **Notifications**: **Telegram bot** as primary user channel (instant,
+   free, no approval, no rate limit), **SMTP email** via Gmail / SendGrid
+   free tier, **Web Push (VAPID)** for in-browser. **Twilio** wired behind
+   `TWILIO_API_KEY` env flag for the day a real SMS path is paid for.
+3. **Routing chain (free)**: **OSRM self-hosted** (Docker, India OSM
+   extract — unlimited) → **OpenRouteService** (2000 req/day free) →
+   **HERE Routes** (250K req/month free) → **haversine** (always-on
+   fallback). All free up to demo scale.
+4. **LLM split**: **Groq Llama 3.3 70B** for caller intake (speed
+   matters), **Gemini 2.5 Flash** for ER pre-arrival briefing (longer
+   context + medical reasoning). Already free on both sides.
+5. **MCI mode (Phase 3.3)**: included. Pure software, no external deps,
+   highest demo impact in Phase 3.
 
 ---
 
