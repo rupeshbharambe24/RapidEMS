@@ -55,3 +55,22 @@ class RoutePreview(BaseModel):
     congestion: float
     provider: str
     used_fallback: bool
+
+
+# ── Multi-emergency optimisation (Phase 1.2) ──────────────────────────────
+class OptimizeProposal(BaseModel):
+    emergency_id: int
+    ambulance_id: int
+    ambulance_registration: str
+    predicted_eta_seconds: int
+    predicted_eta_minutes: float
+    severity_level: int
+    cost: float
+    road_provider: str
+
+
+class OptimizeResponse(BaseModel):
+    preview: bool
+    proposals: list[OptimizeProposal]
+    unassigned_emergency_ids: list[int]
+    dispatched_plans: list[DispatchPlan] = []     # only populated when preview=False

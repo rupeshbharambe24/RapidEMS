@@ -58,9 +58,11 @@ export const hospitalsApi = {
 
 // ─────────── Dispatches ───────────
 export const dispatchesApi = {
-  list:    (params) => api.get('/dispatches', { params }).then(r => r.data),
-  active:  ()       => api.get('/dispatches/active').then(r => r.data),
-  get:     (id)     => api.get(`/dispatches/${id}`).then(r => r.data),
+  list:     (params)              => api.get('/dispatches', { params }).then(r => r.data),
+  active:   ()                    => api.get('/dispatches/active').then(r => r.data),
+  get:      (id)                  => api.get(`/dispatches/${id}`).then(r => r.data),
+  optimize: (execute = false)     => api.post('/dispatches/optimize',
+                                              null, { params: { execute } }).then(r => r.data),
 }
 
 // ─────────── AI inference ───────────

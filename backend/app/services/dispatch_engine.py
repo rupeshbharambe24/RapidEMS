@@ -65,9 +65,18 @@ async def _briefing_background(dispatch_id: int, alert_id: int,
         log.warning(f"briefing background task failed: {exc}")
 
 
-async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
-                             user_id: Optional[int] = None) -> DispatchPlan:
-    """Run the full dispatch pipeline for an emergency."""
+async def dispatch_emergency(
+    db: AsyncSession, emergency: Emergency,
+    user_id: Optional[int] = None,
+    *,
+    forced_ambulance: Optional[Ambulance] = None,
+) -> DispatchPlan:
+    """Run the full dispatch pipeline for an emergency.
+
+    ``forced_ambulance`` is supplied by the multi-emergency optimizer
+    (Phase 1.2) so the Hungarian assignment is honoured even when a different
+    ambulance would have been the greedy local pick.
+    """
     ai = get_ai_service()
     now = datetime.utcnow()
     used_fallback = False
@@ -108,27 +117,30 @@ async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
     else:                                      # Minor / Non-emergency
         required = [AmbulanceType.BLS.value]
 
-    candidates = (await db.scalars(
-        select(Ambulance).where(
-            Ambulance.status == AmbulanceStatus.AVAILABLE.value,
-            Ambulance.is_active == True,
-            Ambulance.ambulance_type.in_(required),
-        )
-    )).all()
-
-    if not candidates:
-        # Relax type constraint as a fallback.
+    if forced_ambulance is not None:
+        candidates = [forced_ambulance]
+    else:
         candidates = (await db.scalars(
             select(Ambulance).where(
                 Ambulance.status == AmbulanceStatus.AVAILABLE.value,
                 Ambulance.is_active == True,
+                Ambulance.ambulance_type.in_(required),
             )
         )).all()
-        if candidates:
-            log.warning(f"No ambulances of required type {required} — using any available")
 
-    if not candidates:
-        raise DispatchError("No available ambulances right now.")
+        if not candidates:
+            # Relax type constraint as a fallback.
+            candidates = (await db.scalars(
+                select(Ambulance).where(
+                    Ambulance.status == AmbulanceStatus.AVAILABLE.value,
+                    Ambulance.is_active == True,
+                )
+            )).all()
+            if candidates:
+                log.warning(f"No ambulances of required type {required} — using any available")
+
+        if not candidates:
+            raise DispatchError("No available ambulances right now.")
 
     # ── 3. ETA per candidate using current traffic ────────
     zone_id = estimate_zone_id(emergency.location_lat, emergency.location_lng)
