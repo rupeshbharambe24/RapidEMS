@@ -22,6 +22,7 @@ export default function Login() {
       const role = r.user?.role
       nav(role === 'patient' ? '/patient'
           : role === 'paramedic' ? '/driver'
+          : role === 'hospital_staff' ? '/hospital'
           : '/dashboard')
     } catch (e) {
       setErr(e?.response?.data?.detail || 'Authentication failed')

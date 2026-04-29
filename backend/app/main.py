@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api import (ai as ai_routes, ambulances, analytics, auth, dispatches,
-                  driver, emergencies, hospitals, patient, routing)
+                  driver, emergencies, hospital_portal, hospitals, patient,
+                  routing)
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
@@ -91,6 +92,7 @@ app.include_router(analytics.router)
 app.include_router(routing.router)
 app.include_router(patient.router)
 app.include_router(driver.router)
+app.include_router(hospital_portal.router)
 
 
 @app.get("/", tags=["meta"])

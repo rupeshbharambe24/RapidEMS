@@ -1,7 +1,7 @@
 """Application users with role-based access."""
 import enum
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from ..database import Base
 
@@ -25,3 +25,8 @@ class User(Base):
     role = Column(String(20), default=UserRole.DISPATCHER.value)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Phase 0.6 — hospital_staff users belong to one hospital. Set via
+    # POST /hospital/claim/{hospital_id} or admin assignment.
+    assigned_hospital_id = Column(Integer, ForeignKey("hospitals.id"),
+                                  nullable=True, index=True)

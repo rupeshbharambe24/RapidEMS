@@ -12,6 +12,7 @@ import HospitalAvailability from './pages/HospitalAvailability.jsx'
 import Analytics from './pages/Analytics.jsx'
 import PatientDashboard from './pages/PatientDashboard.jsx'
 import AmbulanceDriverDashboard from './pages/AmbulanceDriverDashboard.jsx'
+import HospitalPortal from './pages/HospitalPortal.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -37,6 +38,11 @@ export default function App() {
       {/* Paramedic / driver surface — full-screen map, no dispatcher sidebar */}
       <Route path="/driver" element={
         <ProtectedRoute><AmbulanceDriverDashboard /></ProtectedRoute>
+      }/>
+
+      {/* Hospital staff surface — alert feed + bed editor */}
+      <Route path="/hospital" element={
+        <ProtectedRoute><HospitalPortal /></ProtectedRoute>
       }/>
 
       {/* Dispatcher / clinical / admin surface */}

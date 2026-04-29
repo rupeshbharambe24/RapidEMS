@@ -56,3 +56,13 @@ async def emit_emergency_dispatched(payload: dict):
 
 async def emit_hospital_beds_updated(payload: dict):
     await sio.emit("hospital:beds_updated", payload)
+
+
+async def emit_hospital_alert(payload: dict):
+    """Pre-arrival alert pushed to hospital staff dashboards."""
+    await sio.emit("hospital:alert", payload)
+
+
+async def emit_hospital_alert_status(payload: dict):
+    """Acknowledged / accepted / diverted — keeps dispatcher dashboards in sync."""
+    await sio.emit("hospital:alert_status", payload)

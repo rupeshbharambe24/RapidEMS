@@ -26,7 +26,9 @@ from ..models.audit_log import AuditLog
 from ..models.dispatch import Dispatch, DispatchStatus
 from ..models.emergency import Emergency, EmergencyStatus
 from ..models.hospital import Hospital
+from ..models.hospital_alert import AlertStatus, HospitalAlert
 from ..schemas.dispatch import DispatchPlan
+from ..sockets.sio import emit_hospital_alert
 from .ai_service import get_ai_service
 from .geo_service import estimate_zone_id, haversine_km
 from .routing_service import RouteResult, route as road_route
@@ -215,6 +217,33 @@ async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
     ))
     await db.commit()
     await db.refresh(dispatch)
+
+    # Hospital pre-arrival alert. The briefing slot is filled by Phase 0.9.
+    alert = HospitalAlert(
+        hospital_id=best_hosp.id,
+        dispatch_id=dispatch.id,
+        emergency_id=emergency.id,
+        severity_level=severity_level,
+        eta_seconds=int(best_eta_seconds),
+        patient_type=patient_type,
+        status=AlertStatus.PENDING.value,
+    )
+    db.add(alert)
+    await db.commit()
+    await db.refresh(alert)
+    await emit_hospital_alert({
+        "id": alert.id,
+        "hospital_id": best_hosp.id,
+        "hospital_name": best_hosp.name,
+        "dispatch_id": dispatch.id,
+        "emergency_id": emergency.id,
+        "severity_level": severity_level,
+        "eta_seconds": int(best_eta_seconds),
+        "eta_minutes": round(best_eta_seconds / 60.0, 1),
+        "patient_type": patient_type,
+        "ambulance_registration": best_amb.registration_number,
+        "status": alert.status,
+    })
 
     log.success(
         f"Dispatch #{dispatch.id} | sev {severity_level} | "

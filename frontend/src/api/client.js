@@ -116,6 +116,21 @@ export const driverApi = {
   pushGps:   (lat, lng)      => api.patch('/driver/location', { lat, lng }).then(r => r.data),
 }
 
+// ─────────── Hospital portal ───────────
+export const hospitalPortalApi = {
+  me:           ()              => api.get('/hospital/me').then(r => r.data),
+  claim:        (hid)           => api.post(`/hospital/claim/${hid}`).then(r => r.data),
+  release:      ()              => api.post('/hospital/release').then(r => r.data),
+  listAlerts:   (only_open=true)=> api.get('/hospital/alerts',
+                                          { params: { only_open } }).then(r => r.data),
+  acknowledge:  (id)            => api.post(`/hospital/alerts/${id}/acknowledge`).then(r => r.data),
+  accept:       (id)            => api.post(`/hospital/alerts/${id}/accept`).then(r => r.data),
+  divert:       (id, set_hospital=true) =>
+                                  api.post(`/hospital/alerts/${id}/divert`,
+                                          { set_hospital_diversion: set_hospital }).then(r => r.data),
+  updateBeds:   (payload)       => api.patch('/hospital/me/beds', payload).then(r => r.data),
+}
+
 // ─────────── Health ───────────
 export const healthApi = () => api.get('/health').then(r => r.data)
 
