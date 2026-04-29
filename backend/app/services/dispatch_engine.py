@@ -28,8 +28,9 @@ from ..models.emergency import Emergency, EmergencyStatus
 from ..models.hospital import Hospital
 from ..models.hospital_alert import AlertStatus, HospitalAlert
 from ..schemas.dispatch import DispatchPlan
-from ..sockets.sio import emit_hospital_alert
+from ..sockets.sio import emit_hospital_alert, emit_hospital_alert_status
 from .ai_service import get_ai_service
+from .er_briefing import generate_briefing
 from .geo_service import estimate_zone_id, haversine_km
 from .notifications import notify_dispatch_created
 from .routing_service import RouteResult, route as road_route
@@ -37,6 +38,31 @@ from .routing_service import RouteResult, route as road_route
 
 class DispatchError(Exception):
     """Raised when dispatch is impossible (no ambulances, no hospitals)."""
+
+
+async def _briefing_background(dispatch_id: int, alert_id: int,
+                               hospital_id: int) -> None:
+    """Generate the ER briefing in its own session after dispatch returns."""
+    from ..database import AsyncSessionLocal
+    from sqlalchemy import select as _select
+    try:
+        async with AsyncSessionLocal() as db:
+            d = await db.scalar(_select(Dispatch).where(Dispatch.id == dispatch_id))
+            if not d:
+                return
+            text = await generate_briefing(db, d)
+            alert = await db.scalar(
+                _select(HospitalAlert).where(HospitalAlert.id == alert_id))
+            if not alert:
+                return
+            alert.briefing = text
+            await db.commit()
+        await emit_hospital_alert_status({
+            "alert_id": alert_id, "hospital_id": hospital_id,
+            "briefing_ready": True,
+        })
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"briefing background task failed: {exc}")
 
 
 async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
@@ -260,6 +286,10 @@ async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
         await notify_dispatch_created(db, dispatch, plan=None)
     except Exception as exc:  # noqa: BLE001
         log.warning(f"notify_dispatch_created failed: {exc}")
+
+    # Background ER briefing (Gemini ~3-5s; falls back to template). Runs in
+    # its own AsyncSession so the request can return immediately.
+    asyncio.create_task(_briefing_background(dispatch.id, alert.id, best_hosp.id))
 
     return DispatchPlan(
         dispatch_id=dispatch.id,

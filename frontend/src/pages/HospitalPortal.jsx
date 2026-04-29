@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Hospital as HospitalIcon, Activity, BedDouble, Heart, Loader2,
   CheckCircle2, AlertTriangle, ShieldOff, LogOut, RefreshCw, Phone,
-  Clock,
+  Clock, FileText, ChevronDown, ChevronUp, Wand2,
 } from 'lucide-react'
 
 import { hospitalPortalApi, hospitalsApi } from '../api/client.js'
@@ -102,9 +102,13 @@ export default function HospitalPortal() {
     try {
       const fn = kind === 'ack' ? hospitalPortalApi.acknowledge
               : kind === 'accept' ? hospitalPortalApi.accept
-              : hospitalPortalApi.divert
+              : kind === 'divert' ? hospitalPortalApi.divert
+              : kind === 'regen'  ? hospitalPortalApi.regenerateBriefing
+              : null
+      if (!fn) return
       await fn(id)
       setSnap(await hospitalPortalApi.me())
+      if (kind === 'regen') toast('Briefing regenerated', 'success')
     } catch (err) {
       toast(err?.response?.data?.detail || `${kind} failed`, 'critical')
     } finally { setBusy(false) }
@@ -187,6 +191,7 @@ export default function HospitalPortal() {
 
 // ── Alert card ─────────────────────────────────────────────────────────────
 function AlertCard({ alert, busy, onAct }) {
+  const [showBriefing, setShowBriefing] = useState(false)
   const e = alert.emergency
   const sev = alert.severity_level || 0
   const chip = STATUS_CHIP[alert.status] || STATUS_CHIP.pending
@@ -237,6 +242,38 @@ function AlertCard({ alert, busy, onAct }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ER briefing */}
+      <div className="mt-3 pt-3 border-t border-line/30">
+        <button onClick={() => setShowBriefing(v => !v)}
+                className="w-full flex items-center justify-between gap-2 text-xs font-mono uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors">
+          <span className="flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5"/>
+            ER briefing
+            {!alert.briefing && <span className="text-slate-600 normal-case">— generating…</span>}
+          </span>
+          {showBriefing
+            ? <ChevronUp className="w-3.5 h-3.5"/>
+            : <ChevronDown className="w-3.5 h-3.5"/>}
+        </button>
+        {showBriefing && (
+          <div className="mt-2 p-3 rounded bg-ink-700/40 border border-line/30">
+            {alert.briefing ? (
+              <pre className="text-xs whitespace-pre-wrap font-mono text-slate-200 leading-relaxed">
+                {alert.briefing}
+              </pre>
+            ) : (
+              <div className="text-xs text-slate-500 italic">
+                The LLM briefing is still generating. Try regenerate in a moment.
+              </div>
+            )}
+            <button onClick={() => onAct('regen')} disabled={busy}
+                    className="mt-2 btn-ghost text-[10px]">
+              <Wand2 className="w-3 h-3"/>regenerate briefing
+            </button>
+          </div>
+        )}
       </div>
 
       {open && (
