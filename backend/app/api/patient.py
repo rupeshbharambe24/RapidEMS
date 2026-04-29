@@ -23,6 +23,7 @@ from ..schemas.patient import (MedicalRecordOut, PatientProfileCreate,
                                PatientProfileOut, PatientProfileUpdate,
                                RaiseEmergencyRequest, RaiseEmergencyResponse)
 from ..services.dispatch_engine import DispatchError, dispatch_emergency
+from ..services.tracking_link import create_link as create_tracking_link
 from ..sockets.sio import emit_emergency_created, emit_emergency_dispatched
 from .deps import require_role, require_user
 
@@ -243,6 +244,22 @@ async def raise_sos(
     try:
         plan = await dispatch_emergency(db, emergency, user_id=user.id)
         background.add_task(emit_emergency_dispatched, plan.model_dump())
+
+        # Auto-create a tracking link if the profile has a NoK contact —
+        # the patient gets the URL inline so they can forward it.
+        tracking_token: Optional[str] = None
+        if profile and profile.emergency_contact_phone:
+            try:
+                _, tracking_token = await create_tracking_link(
+                    db, emergency.id,
+                    dispatch_id=plan.dispatch_id,
+                    nok_name=profile.emergency_contact_name,
+                    nok_phone=profile.emergency_contact_phone,
+                    nok_relation=profile.emergency_contact_relation,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         return RaiseEmergencyResponse(
             emergency_id=emergency.id,
             severity_level=plan.severity_level,
@@ -251,7 +268,7 @@ async def raise_sos(
             ambulance_registration=plan.ambulance_registration,
             hospital_name=plan.hospital_name,
             eta_minutes=plan.predicted_eta_minutes,
-            tracking_token=None,   # Phase 0.10 fills this
+            tracking_token=tracking_token,
             message=f"Help dispatched: {plan.ambulance_registration} → "
                     f"{plan.hospital_name} (ETA {plan.predicted_eta_minutes:.1f}m)",
         )
