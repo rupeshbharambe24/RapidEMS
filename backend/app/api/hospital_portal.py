@@ -20,6 +20,7 @@ from ..models.hospital_alert import AlertStatus, HospitalAlert
 from ..models.user import User
 from ..schemas.emergency import EmergencyOut
 from ..schemas.hospital import HospitalBedsUpdate, HospitalOut
+from ..services.er_briefing import generate_briefing
 from ..sockets.sio import (emit_hospital_alert_status,
                            emit_hospital_beds_updated)
 from .deps import require_role
@@ -236,6 +237,34 @@ async def divert(
     background.add_task(emit_hospital_alert_status,
                         {"alert_id": alert.id, "status": alert.status,
                          "hospital_id": h.id, "now_on_diversion": h.is_diversion})
+    return await _decorate(db, alert)
+
+
+# ── Briefing regeneration ──────────────────────────────────────────────────
+@router.post("/alerts/{alert_id}/briefing/regenerate", response_model=AlertActionResponse)
+async def regenerate_briefing(
+    alert_id: int,
+    background: BackgroundTasks,
+    user: User = Depends(require_role("hospital_staff", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run the LLM briefer for an alert. Useful if records were uploaded
+    after dispatch or the team wants a fresh take."""
+    h = await _my_hospital(db, user)
+    alert = await db.scalar(
+        select(HospitalAlert).where(HospitalAlert.id == alert_id))
+    if not alert or alert.hospital_id != h.id:
+        raise HTTPException(404, detail="Alert not found at your hospital.")
+    dispatch = await db.scalar(
+        select(Dispatch).where(Dispatch.id == alert.dispatch_id))
+    if not dispatch:
+        raise HTTPException(410, detail="Dispatch missing.")
+    alert.briefing = await generate_briefing(db, dispatch)
+    await db.commit()
+    await db.refresh(alert)
+    background.add_task(emit_hospital_alert_status,
+                        {"alert_id": alert.id, "hospital_id": h.id,
+                         "briefing_ready": True})
     return await _decorate(db, alert)
 
 

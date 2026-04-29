@@ -150,6 +150,7 @@ export const hospitalPortalApi = {
   divert:       (id, set_hospital=true) =>
                                   api.post(`/hospital/alerts/${id}/divert`,
                                           { set_hospital_diversion: set_hospital }).then(r => r.data),
+  regenerateBriefing: (id)      => api.post(`/hospital/alerts/${id}/briefing/regenerate`).then(r => r.data),
   updateBeds:   (payload)       => api.patch('/hospital/me/beds', payload).then(r => r.data),
 }
 
