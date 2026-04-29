@@ -6,6 +6,8 @@ python-multipart==0.0.12
 # --- Database ---
 sqlalchemy==2.0.36
 alembic==1.13.3
+aiosqlite==0.20.0          # async SQLite driver (dev)
+asyncpg==0.30.0            # async PostgreSQL driver (prod)
 
 # --- Validation / settings ---
 pydantic==2.9.2

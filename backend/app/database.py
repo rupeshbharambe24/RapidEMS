@@ -1,38 +1,51 @@
-"""SQLAlchemy engine, session factory, and base class."""
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+"""Async SQLAlchemy engine, session factory, and base class.
+
+The dev path uses ``sqlite+aiosqlite``; the prod path uses ``postgresql+asyncpg``.
+``settings.database_url`` is auto-translated, so existing ``.env`` files
+written against the sync drivers (``sqlite:///`` / ``postgresql+psycopg2://``)
+keep working.
+"""
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
+from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
 
-is_sqlite = settings.database_url.startswith("sqlite")
-
-# SQLite needs `check_same_thread=False` and a longer busy timeout to handle
-# concurrent traffic from the simulator (20 ambulances PATCHing) plus the
-# frontend's polling.
-connect_args = {}
-if is_sqlite:
-    connect_args = {"check_same_thread": False, "timeout": 30}
-
-# Larger pool for the simulator + frontend + sockets concurrency; the default
-# of 5+10 was easy to exhaust during demos.
-engine_kwargs = dict(
-    echo=False, future=True,
-    pool_size=20, max_overflow=40,
-    pool_recycle=1800, pool_pre_ping=True,
-)
-
-engine = create_engine(
-    settings.database_url,
-    connect_args=connect_args,
-    **engine_kwargs,
-)
+def _to_async_url(url: str) -> str:
+    """Map sync DSNs to their async equivalents so .env doesn't have to know."""
+    if url.startswith("sqlite:///"):
+        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    if url.startswith("postgresql+psycopg2://"):
+        return url.replace("postgresql+psycopg2://",
+                           "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
 
 
-# Enable WAL mode on SQLite so readers don't block writers (and vice versa)
-# during the simulator's GPS update storm.
-if is_sqlite:
-    @event.listens_for(engine, "connect")
+DATABASE_URL = _to_async_url(settings.database_url)
+IS_SQLITE = "sqlite" in DATABASE_URL
+
+
+# Async SQLite (aiosqlite) doesn't take ``pool_size`` / ``max_overflow``;
+# its underlying QueuePool is replaced with a single-connection model. The
+# WAL pragmas below give us reader/writer concurrency anyway.
+connect_args: dict = {"timeout": 30} if IS_SQLITE else {}
+
+engine_kwargs: dict = dict(echo=False, pool_pre_ping=True, pool_recycle=1800)
+if not IS_SQLITE:
+    engine_kwargs.update(pool_size=20, max_overflow=40)
+
+engine = create_async_engine(DATABASE_URL, connect_args=connect_args,
+                             **engine_kwargs)
+
+
+if IS_SQLITE:
+    @event.listens_for(engine.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, _conn_record):  # noqa: ANN001
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -41,7 +54,9 @@ if is_sqlite:
         cursor.close()
 
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(
+    engine, expire_on_commit=False, class_=AsyncSession,
+)
 
 
 class Base(DeclarativeBase):
@@ -49,21 +64,21 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db():
-    """FastAPI dependency that yields a DB session and closes it after the request."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    """FastAPI dependency yielding an AsyncSession scoped to one request."""
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
-def create_all_tables():
-    """Create every table defined on Base.metadata. Idempotent."""
-    # Import models here so SQLAlchemy registers them with Base.metadata
-    # before we try to create tables.
+async def create_all_tables():
+    """Create every table defined on Base.metadata. Idempotent.
+
+    Will be replaced by ``alembic upgrade head`` in Phase 0.3.
+    """
+    # Importing the model modules registers them with Base.metadata.
     from .models import (  # noqa: F401
         ambulance, audit_log, dispatch, emergency, hospital,
         traffic_snapshot, user,
     )
-    Base.metadata.create_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)

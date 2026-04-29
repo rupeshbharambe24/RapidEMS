@@ -1,4 +1,5 @@
 """End-to-end smoke tests."""
+import asyncio
 import os, sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database import create_all_tables, SessionLocal
+from app.database import create_all_tables, AsyncSessionLocal
 from app.main import app
 from app.seed import seed_database
 
@@ -23,9 +24,13 @@ def setup_module():
     test_db = Path("./test.db")
     if test_db.exists():
         test_db.unlink()
-    create_all_tables()
-    with SessionLocal() as db:
-        seed_database(db, force=True)
+
+    async def _bootstrap():
+        await create_all_tables()
+        async with AsyncSessionLocal() as db:
+            await seed_database(db, force=True)
+
+    asyncio.run(_bootstrap())
     yield
     if test_db.exists():
         test_db.unlink()

@@ -16,7 +16,8 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.logging import log
@@ -35,7 +36,7 @@ class DispatchError(Exception):
     """Raised when dispatch is impossible (no ambulances, no hospitals)."""
 
 
-async def dispatch_emergency(db: Session, emergency: Emergency,
+async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
                              user_id: Optional[int] = None) -> DispatchPlan:
     """Run the full dispatch pipeline for an emergency."""
     ai = get_ai_service()
@@ -67,7 +68,7 @@ async def dispatch_emergency(db: Session, emergency: Emergency,
         patient_type = ai.infer_patient_type(emergency.symptoms or [],
                                              age=emergency.patient_age)
         emergency.inferred_patient_type = patient_type
-    db.commit()
+    await db.commit()
 
     # ── 2. Filter ambulances by required type ─────────────
     if severity_level <= 2:                    # Critical / Serious
@@ -78,18 +79,22 @@ async def dispatch_emergency(db: Session, emergency: Emergency,
     else:                                      # Minor / Non-emergency
         required = [AmbulanceType.BLS.value]
 
-    candidates = (db.query(Ambulance)
-                  .filter(Ambulance.status == AmbulanceStatus.AVAILABLE.value,
-                          Ambulance.is_active == True,
-                          Ambulance.ambulance_type.in_(required))
-                  .all())
+    candidates = (await db.scalars(
+        select(Ambulance).where(
+            Ambulance.status == AmbulanceStatus.AVAILABLE.value,
+            Ambulance.is_active == True,
+            Ambulance.ambulance_type.in_(required),
+        )
+    )).all()
 
     if not candidates:
-        # Relax type constraint as a fallback
-        candidates = (db.query(Ambulance)
-                      .filter(Ambulance.status == AmbulanceStatus.AVAILABLE.value,
-                              Ambulance.is_active == True)
-                      .all())
+        # Relax type constraint as a fallback.
+        candidates = (await db.scalars(
+            select(Ambulance).where(
+                Ambulance.status == AmbulanceStatus.AVAILABLE.value,
+                Ambulance.is_active == True,
+            )
+        )).all()
         if candidates:
             log.warning(f"No ambulances of required type {required} — using any available")
 
@@ -158,9 +163,9 @@ async def dispatch_emergency(db: Session, emergency: Emergency,
             best_route = rr
 
     # ── 4. Pick the best capable hospital ─────────────────
-    candidate_hospitals = (db.query(Hospital)
-                           .filter(Hospital.is_active == True)
-                           .all())
+    candidate_hospitals = (await db.scalars(
+        select(Hospital).where(Hospital.is_active == True)
+    )).all()
     if not candidate_hospitals:
         raise DispatchError("No active hospitals in the system.")
 
@@ -208,8 +213,8 @@ async def dispatch_emergency(db: Session, emergency: Emergency,
             "used_fallback": used_fallback,
         },
     ))
-    db.commit()
-    db.refresh(dispatch)
+    await db.commit()
+    await db.refresh(dispatch)
 
     log.success(
         f"Dispatch #{dispatch.id} | sev {severity_level} | "

@@ -1,6 +1,6 @@
-"""Auth endpoints: /login, /register, /me."""
+"""Auth endpoints: /login, /register, /me. Async."""
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.security import create_access_token
@@ -14,8 +14,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenOut)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = auth_service.authenticate(db, payload.username, payload.password)
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    user = await auth_service.authenticate(db, payload.username, payload.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Invalid username or password.")
@@ -28,10 +28,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
-def register(payload: UserCreate, db: Session = Depends(get_db)):
-    if auth_service.get_user_by_username(db, payload.username):
+async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+    if await auth_service.get_user_by_username(db, payload.username):
         raise HTTPException(status_code=400, detail="Username already exists.")
-    user = auth_service.create_user(db, **payload.model_dump())
+    user = await auth_service.create_user(db, **payload.model_dump())
     return UserOut.model_validate(user)
 
 

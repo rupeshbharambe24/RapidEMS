@@ -2,7 +2,8 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.emergency import Emergency, EmergencyStatus
@@ -19,15 +20,14 @@ router = APIRouter(prefix="/emergencies", tags=["emergencies"])
 async def create_emergency(
     payload: EmergencyCreate,
     background: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
     emergency = Emergency(**payload.model_dump())
     db.add(emergency)
-    db.commit()
-    db.refresh(emergency)
+    await db.commit()
+    await db.refresh(emergency)
 
-    # Push real-time event
     background.add_task(emit_emergency_created, {
         "id": emergency.id,
         "lat": emergency.location_lat,
@@ -41,20 +41,21 @@ async def create_emergency(
 
 
 @router.get("", response_model=List[EmergencyOut])
-def list_emergencies(
+async def list_emergencies(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    q = db.query(Emergency).order_by(Emergency.created_at.desc())
+    stmt = select(Emergency).order_by(Emergency.created_at.desc())
     if status:
-        q = q.filter(Emergency.status == status)
-    return [EmergencyOut.model_validate(e) for e in q.limit(limit).all()]
+        stmt = stmt.where(Emergency.status == status)
+    rows = (await db.scalars(stmt.limit(limit))).all()
+    return [EmergencyOut.model_validate(e) for e in rows]
 
 
 @router.get("/{emergency_id}", response_model=EmergencyOut)
-def get_emergency(emergency_id: int, db: Session = Depends(get_db)):
-    e = db.query(Emergency).filter(Emergency.id == emergency_id).first()
+async def get_emergency(emergency_id: int, db: AsyncSession = Depends(get_db)):
+    e = await db.scalar(select(Emergency).where(Emergency.id == emergency_id))
     if not e:
         raise HTTPException(404, detail="Emergency not found.")
     return EmergencyOut.model_validate(e)
@@ -64,10 +65,10 @@ def get_emergency(emergency_id: int, db: Session = Depends(get_db)):
 async def trigger_dispatch(
     emergency_id: int,
     background: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    e = db.query(Emergency).filter(Emergency.id == emergency_id).first()
+    e = await db.scalar(select(Emergency).where(Emergency.id == emergency_id))
     if not e:
         raise HTTPException(404, detail="Emergency not found.")
     if e.status != EmergencyStatus.PENDING.value:
@@ -83,13 +84,13 @@ async def trigger_dispatch(
 
 
 @router.patch("/{emergency_id}", response_model=EmergencyOut)
-def update_emergency(emergency_id: int, payload: EmergencyUpdate,
-                     db: Session = Depends(get_db)):
-    e = db.query(Emergency).filter(Emergency.id == emergency_id).first()
+async def update_emergency(emergency_id: int, payload: EmergencyUpdate,
+                           db: AsyncSession = Depends(get_db)):
+    e = await db.scalar(select(Emergency).where(Emergency.id == emergency_id))
     if not e:
         raise HTTPException(404, detail="Emergency not found.")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(e, k, v)
-    db.commit()
-    db.refresh(e)
+    await db.commit()
+    await db.refresh(e)
     return EmergencyOut.model_validate(e)

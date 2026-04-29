@@ -1,18 +1,20 @@
-"""Authentication service — login, user lookup."""
+"""Authentication service — login, user lookup. Async."""
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import hash_password, verify_password
 from ..models.user import User, UserRole
 
 
-def get_user_by_username(db: Session, username: str) -> Optional[User]:
-    return db.query(User).filter(User.username == username).first()
+async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
+    return await db.scalar(select(User).where(User.username == username))
 
 
-def authenticate(db: Session, username: str, password: str) -> Optional[User]:
-    user = get_user_by_username(db, username)
+async def authenticate(db: AsyncSession, username: str,
+                       password: str) -> Optional[User]:
+    user = await get_user_by_username(db, username)
     if not user or not user.is_active:
         return None
     if not verify_password(password, user.hashed_password):
@@ -20,8 +22,8 @@ def authenticate(db: Session, username: str, password: str) -> Optional[User]:
     return user
 
 
-def create_user(
-    db: Session,
+async def create_user(
+    db: AsyncSession,
     *,
     username: str,
     email: str,
@@ -37,6 +39,6 @@ def create_user(
         role=role,
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return user

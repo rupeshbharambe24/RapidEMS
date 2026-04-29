@@ -17,7 +17,7 @@ from .api import (ai as ai_routes, ambulances, analytics, auth, dispatches,
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
-from .database import SessionLocal, create_all_tables
+from .database import AsyncSessionLocal, create_all_tables
 from .seed import seed_database
 from .services.ai_service import get_ai_service
 from .sockets.sio import sio
@@ -32,13 +32,13 @@ async def lifespan(app: FastAPI):
     log.info("=" * 60)
 
     # 1. Tables
-    create_all_tables()
+    await create_all_tables()
     log.success("Database tables ready ✓")
 
     # 2. Seed
     if settings.seed_on_startup:
-        with SessionLocal() as db:
-            seed_database(db)
+        async with AsyncSessionLocal() as db:
+            await seed_database(db)
 
     # 3. Startup health checks (warns about missing model files)
     run_startup_checks()
