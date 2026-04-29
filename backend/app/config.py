@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     llm_provider_order: str = "groq,gemini"
 
+    # ── Routing providers (optional, all free tier) ──
+    # Chain order: OSRM (self-hosted, unlimited) -> ORS (2000/day) ->
+    # HERE (250K/month) -> haversine. Empty values skip that provider.
+    osrm_url: str = ""                 # e.g. http://localhost:5000
+    ors_api_key: str = ""              # https://openrouteservice.org/dev/
+    here_api_key: str = ""             # https://platform.here.com/
+    # Blend weight for road ETA vs ML ETA when both are available.
+    eta_road_weight: float = 0.7
+
     # ── CORS ──
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 

@@ -12,11 +12,13 @@ Given an Emergency, this:
 
 This is the only place where the 5 ML models meaningfully come together.
 """
+import asyncio
 from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..core.logging import log
 from ..models.ambulance import Ambulance, AmbulanceStatus, AmbulanceType
 from ..models.audit_log import AuditLog
@@ -26,14 +28,15 @@ from ..models.hospital import Hospital
 from ..schemas.dispatch import DispatchPlan
 from .ai_service import get_ai_service
 from .geo_service import estimate_zone_id, haversine_km
+from .routing_service import RouteResult, route as road_route
 
 
 class DispatchError(Exception):
     """Raised when dispatch is impossible (no ambulances, no hospitals)."""
 
 
-def dispatch_emergency(db: Session, emergency: Emergency,
-                       user_id: Optional[int] = None) -> DispatchPlan:
+async def dispatch_emergency(db: Session, emergency: Emergency,
+                             user_id: Optional[int] = None) -> DispatchPlan:
     """Run the full dispatch pipeline for an emergency."""
     ai = get_ai_service()
     now = datetime.utcnow()
@@ -109,32 +112,50 @@ def dispatch_emergency(db: Session, emergency: Emergency,
     best_amb = None
     best_eta_seconds = float("inf")
     best_distance_km = 0.0
+    best_road_meters: Optional[float] = None
+    best_route: Optional[RouteResult] = None
 
     type_to_int = {AmbulanceType.BLS.value: 0,
                    AmbulanceType.ALS.value: 1,
                    AmbulanceType.ICU_MOBILE.value: 2}
 
+    # Resolve current GPS for every candidate (depot fallback if unreported).
+    starts = []
     for amb in candidates:
         if amb.current_lat is None or amb.current_lng is None:
-            # ambulance hasn't reported GPS yet — assume it's at home depot
-            cur_lat = amb.home_station_lat
-            cur_lng = amb.home_station_lng
+            starts.append((amb.home_station_lat, amb.home_station_lng))
         else:
-            cur_lat, cur_lng = amb.current_lat, amb.current_lng
+            starts.append((amb.current_lat, amb.current_lng))
+
+    # Parallel road-routing for every candidate. Even with 20 candidates this
+    # finishes in roughly the slowest provider's response time, not 20× it.
+    routes: list[RouteResult] = await asyncio.gather(*[
+        road_route(s[0], s[1], emergency.location_lat, emergency.location_lng)
+        for s in starts
+    ])
+
+    # Score each candidate by blending road ETA with ML ETA per the configured
+    # weight. Falls back to ML-only when the routing chain only had haversine.
+    for amb, (cur_lat, cur_lng), rr in zip(candidates, starts, routes):
+        road_km = rr.meters / 1000.0
         d_km = haversine_km(cur_lat, cur_lng,
                             emergency.location_lat, emergency.location_lng)
         eta = ai.predict_eta(
-            distance_km=d_km, congestion=congestion,
+            distance_km=road_km, congestion=rr.congestion or congestion,
             hour=now.hour, day_of_week=now.weekday(),
             weather=0,
             ambulance_type=type_to_int.get(amb.ambulance_type, 0),
-            road_type=0,    # urban default
+            road_type=0,
         )
-        used_fallback = used_fallback or eta["used_fallback"]
-        if eta["eta_seconds"] < best_eta_seconds:
-            best_eta_seconds = eta["eta_seconds"]
+        used_fallback = used_fallback or eta["used_fallback"] or rr.used_fallback
+        w = settings.eta_road_weight if not rr.used_fallback else 0.0
+        blended = w * rr.seconds + (1.0 - w) * eta["eta_seconds"]
+        if blended < best_eta_seconds:
+            best_eta_seconds = blended
             best_amb = amb
             best_distance_km = d_km
+            best_road_meters = rr.meters
+            best_route = rr
 
     # ── 4. Pick the best capable hospital ─────────────────
     candidate_hospitals = (db.query(Hospital)
@@ -206,10 +227,14 @@ def dispatch_emergency(db: Session, emergency: Emergency,
         predicted_eta_seconds=int(best_eta_seconds),
         predicted_eta_minutes=round(best_eta_seconds / 60.0, 1),
         distance_km=round(best_distance_km, 2),
+        road_distance_km=round(best_road_meters / 1000.0, 2) if best_road_meters else None,
         hospital_score=round(best_score, 4),
         severity_level=severity_level,
         severity_label=triage["severity_label"],
         severity_confidence=round(triage["confidence"], 4),
         inferred_patient_type=patient_type,
+        routing_provider=best_route.provider if best_route else None,
+        congestion=round(best_route.congestion, 3) if best_route else None,
+        polyline=best_route.polyline if best_route else None,
         used_fallback=used_fallback,
     )

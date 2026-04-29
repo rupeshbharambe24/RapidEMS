@@ -74,7 +74,7 @@ async def trigger_dispatch(
         raise HTTPException(409,
                             detail=f"Emergency already {e.status}; cannot dispatch.")
     try:
-        plan = dispatch_emergency(db, e, user_id=user.id if user else None)
+        plan = await dispatch_emergency(db, e, user_id=user.id if user else None)
     except DispatchError as exc:
         raise HTTPException(409, detail=str(exc))
 

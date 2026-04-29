@@ -32,10 +32,26 @@ class DispatchPlan(BaseModel):
     predicted_eta_seconds: int
     predicted_eta_minutes: float
     distance_km: float
+    road_distance_km: Optional[float] = None
     hospital_score: float
     severity_level: int
     severity_label: str
     severity_confidence: float
     inferred_patient_type: str
+    routing_provider: Optional[str] = None
+    congestion: Optional[float] = None
+    polyline: Optional[list[list[float]]] = None
     used_fallback: bool = False
     notes: Optional[str] = None
+
+
+class RoutePreview(BaseModel):
+    """Response for the GET /routing/preview endpoint."""
+    seconds: float
+    minutes: float
+    meters: float
+    kilometers: float
+    polyline: list[list[float]]
+    congestion: float
+    provider: str
+    used_fallback: bool
