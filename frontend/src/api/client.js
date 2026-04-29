@@ -100,6 +100,15 @@ export const patientApi = {
   activeEmergency:  ()         => api.get('/patient/active-emergency').then(r => r.data),
 }
 
+// ─────────── Family tracking ───────────
+// Note: backend mounts under /track-api so the SPA route /track/:token is free.
+export const trackingApi = {
+  publicSnapshot: (token)        => api.get(`/track-api/${encodeURIComponent(token)}`).then(r => r.data),
+  createLink:     (payload)      => api.post('/track-api/links', payload).then(r => r.data),
+  listMine:       ()             => api.get('/track-api/links').then(r => r.data),
+  revoke:         (id)           => api.post(`/track-api/links/${id}/revoke`).then(r => r.data),
+}
+
 // ─────────── Routing ───────────
 export const routingApi = {
   preview: (from_lat, from_lng, to_lat, to_lng) =>

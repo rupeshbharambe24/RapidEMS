@@ -14,6 +14,7 @@ import PatientDashboard from './pages/PatientDashboard.jsx'
 import AmbulanceDriverDashboard from './pages/AmbulanceDriverDashboard.jsx'
 import HospitalPortal from './pages/HospitalPortal.jsx'
 import Admin from './pages/Admin.jsx'
+import FamilyTracking from './pages/FamilyTracking.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -30,6 +31,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+
+      {/* Public next-of-kin tracking — no auth, token-only */}
+      <Route path="/track/:token" element={<FamilyTracking />} />
 
       {/* Patient surface — own chrome, no dispatcher sidebar */}
       <Route path="/patient" element={

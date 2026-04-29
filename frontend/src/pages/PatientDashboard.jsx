@@ -4,9 +4,10 @@ import {
   AlertCircle, Heart, FileText, Upload, Trash2, MapPin, Phone,
   ShieldAlert, Loader2, LogOut, Activity, Clock, CheckCircle2,
   Bell, Send, Mail, MessageCircle, ExternalLink, Plus, X,
+  Share2, Copy, ShieldOff, Users,
 } from 'lucide-react'
 
-import { patientApi, notificationsApi } from '../api/client.js'
+import { patientApi, notificationsApi, trackingApi } from '../api/client.js'
 import { useAuthStore } from '../store/auth.js'
 import { useUiStore } from '../store/ui.js'
 
@@ -325,6 +326,9 @@ export default function PatientDashboard() {
         {/* Notifications */}
         <NotificationsCard/>
 
+        {/* Family tracking */}
+        <FamilyTrackingCard/>
+
         {/* Medical records */}
         <section className="card p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -576,6 +580,193 @@ function ChannelIcon({ channel }) {
   if (channel === 'email')    return <Mail className="w-4 h-4 text-emerald-300"/>
   if (channel === 'sms')      return <Phone className="w-4 h-4 text-amber-300"/>
   return <Bell className="w-4 h-4 text-slate-400"/>
+}
+
+
+// ── Family tracking card ──────────────────────────────────────────────────
+function FamilyTrackingCard() {
+  const toast = useUiStore(s => s.toast)
+  const [links, setLinks] = useState([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [draft, setDraft] = useState({ emergency_id: '', nok_name: '', nok_phone: '', nok_relation: '', ttl_hours: 4 })
+  const [busy, setBusy] = useState(false)
+  const [latestToken, setLatestToken] = useState(null)
+
+  async function refresh() {
+    try { setLinks(await trackingApi.listMine()) }
+    catch (err) { toast(err?.response?.data?.detail || 'Tracking links load failed', 'critical') }
+  }
+  useEffect(() => {
+    refresh()
+    const t = setInterval(refresh, 8000)
+    return () => clearInterval(t)
+  }, [])
+
+  async function add(e) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const r = await trackingApi.createLink({
+        emergency_id: parseInt(draft.emergency_id),
+        nok_name: draft.nok_name || null,
+        nok_phone: draft.nok_phone || null,
+        nok_relation: draft.nok_relation || null,
+        ttl_hours: draft.ttl_hours,
+      })
+      setLatestToken(r.token)
+      setShowAdd(false)
+      setDraft({ emergency_id: '', nok_name: '', nok_phone: '', nok_relation: '', ttl_hours: 4 })
+      refresh()
+      toast('Tracking link created', 'success')
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Create failed', 'critical')
+    } finally { setBusy(false) }
+  }
+
+  async function revoke(id) {
+    if (!confirm('Revoke this tracking link? Anyone holding the URL will lose access.')) return
+    try {
+      await trackingApi.revoke(id)
+      refresh()
+      toast('Link revoked', 'info')
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Revoke failed', 'critical')
+    }
+  }
+
+  function urlFor(token) {
+    return `${window.location.origin}/track/${token}`
+  }
+  function copyToClipboard(text) {
+    navigator.clipboard?.writeText(text)
+      .then(() => toast('Copied to clipboard', 'success'))
+      .catch(() => toast('Copy failed — long-press to copy manually', 'critical'))
+  }
+
+  const active = links.filter(l => !l.revoked_at && new Date(l.expires_at) > new Date())
+
+  return (
+    <section className="card p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <Users className="w-5 h-5 text-cyan-300"/>
+          <h2 className="text-xl font-bold">Family tracking</h2>
+          <span className="text-xs font-mono text-slate-500">
+            {active.length} active · {links.length} total
+          </span>
+        </div>
+      </div>
+
+      {/* The token shown only at creation time */}
+      {latestToken && (
+        <div className="card p-3 mb-3 border-emerald-400/40 bg-emerald-400/5">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 mb-1">
+            Share this link — visible only now
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 truncate text-xs font-mono text-emerald-100">
+              {urlFor(latestToken)}
+            </code>
+            <button onClick={() => copyToClipboard(urlFor(latestToken))}
+                    className="btn-ghost text-xs">
+              <Copy className="w-3.5 h-3.5"/>copy
+            </button>
+            <button onClick={() => setLatestToken(null)}
+                    className="btn-ghost text-xs">
+              <X className="w-3.5 h-3.5"/>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="text-xs text-slate-500 mb-3">
+        When you raise an SOS we automatically create a tracking link for the next-of-kin
+        on your profile. You can also create extra links manually.
+      </div>
+
+      {/* List */}
+      <div className="divide-y divide-line/40 mb-3">
+        {links.length === 0 && (
+          <div className="text-sm text-slate-500 py-3">
+            No tracking links yet. Raise an SOS — one will be auto-created if your profile has a next-of-kin contact.
+          </div>
+        )}
+        {links.map(l => {
+          const revoked = !!l.revoked_at
+          const expired = new Date(l.expires_at) < new Date()
+          const dead = revoked || expired
+          const expiresMin = Math.max(0, Math.floor((new Date(l.expires_at) - Date.now()) / 60000))
+          return (
+            <div key={l.id} className="py-3 flex items-center gap-3">
+              <Share2 className={`w-4 h-4 shrink-0 ${dead ? 'text-slate-600' : 'text-cyan-300'}`}/>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm flex items-center gap-2 flex-wrap">
+                  <span>Emergency #{l.emergency_id}</span>
+                  {l.nok_name && <span className="text-slate-400">· {l.nok_name}</span>}
+                  {l.nok_relation && <span className="text-xs text-slate-500">({l.nok_relation})</span>}
+                  {revoked && <span className="text-[10px] font-mono uppercase text-amber-300">revoked</span>}
+                  {!revoked && expired && <span className="text-[10px] font-mono uppercase text-slate-500">expired</span>}
+                </div>
+                <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                  {l.view_count} views
+                  {l.last_seen_at && <> · last seen {new Date(l.last_seen_at).toLocaleString()}</>}
+                  {!dead && <> · expires in ~{expiresMin}m</>}
+                </div>
+              </div>
+              {!dead && (
+                <button onClick={() => revoke(l.id)}
+                        className="btn-ghost text-xs text-amber-300">
+                  <ShieldOff className="w-3.5 h-3.5"/>revoke
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Manual add */}
+      {showAdd ? (
+        <form onSubmit={add} className="card p-4 space-y-3 border-cyan-400/30">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Emergency ID *">
+              <input type="number" className="field font-mono" required
+                     value={draft.emergency_id}
+                     onChange={e => setDraft({ ...draft, emergency_id: e.target.value })}/>
+            </Field>
+            <Field label="TTL (hours)">
+              <input type="number" min="1" max="24" className="field font-mono"
+                     value={draft.ttl_hours}
+                     onChange={e => setDraft({ ...draft, ttl_hours: parseInt(e.target.value || '4') })}/>
+            </Field>
+            <Field label="NoK name">
+              <input className="field" value={draft.nok_name}
+                     onChange={e => setDraft({ ...draft, nok_name: e.target.value })}/>
+            </Field>
+            <Field label="Relation">
+              <input className="field" placeholder="mother, brother, …" value={draft.nok_relation}
+                     onChange={e => setDraft({ ...draft, nok_relation: e.target.value })}/>
+            </Field>
+            <Field label="NoK phone" wide>
+              <input className="field font-mono" value={draft.nok_phone}
+                     onChange={e => setDraft({ ...draft, nok_phone: e.target.value })}/>
+            </Field>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-line/30">
+            <button type="submit" disabled={busy} className="btn-danger flex-1">
+              {busy ? 'Creating…' : 'Create link'}
+            </button>
+            <button type="button" onClick={() => setShowAdd(false)} className="btn-ghost px-4">
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button onClick={() => setShowAdd(true)} className="btn-ghost text-xs">
+          <Plus className="w-3.5 h-3.5"/>create link manually
+        </button>
+      )}
+    </section>
+  )
 }
 
 
