@@ -116,6 +116,18 @@ export const driverApi = {
   pushGps:   (lat, lng)      => api.patch('/driver/location', { lat, lng }).then(r => r.data),
 }
 
+// ─────────── Admin ───────────
+export const adminApi = {
+  overview:        ()                  => api.get('/admin/overview').then(r => r.data),
+  listUsers:       (params)            => api.get('/admin/users', { params }).then(r => r.data),
+  createUser:      (payload)           => api.post('/admin/users', payload).then(r => r.data),
+  updateUser:      (id, payload)       => api.patch(`/admin/users/${id}`, payload).then(r => r.data),
+  deactivateUser:  (id)                => api.delete(`/admin/users/${id}`).then(r => r.data),
+  auditLog:        (params)            => api.get('/admin/audit-log', { params }).then(r => r.data),
+  assignAmbulance: (ambId, userId)     => api.patch(`/admin/ambulances/${ambId}/assign`,
+                                          { user_id: userId }).then(r => r.data),
+}
+
 // ─────────── Hospital portal ───────────
 export const hospitalPortalApi = {
   me:           ()              => api.get('/hospital/me').then(r => r.data),

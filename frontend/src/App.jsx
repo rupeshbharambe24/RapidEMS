@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics.jsx'
 import PatientDashboard from './pages/PatientDashboard.jsx'
 import AmbulanceDriverDashboard from './pages/AmbulanceDriverDashboard.jsx'
 import HospitalPortal from './pages/HospitalPortal.jsx'
+import Admin from './pages/Admin.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/ambulances" element={<AmbulanceTracking />} />
         <Route path="/hospitals"  element={<HospitalAvailability />} />
         <Route path="/analytics"  element={<Analytics />} />
+        <Route path="/admin"      element={<Admin />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
