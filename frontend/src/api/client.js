@@ -128,6 +128,16 @@ export const adminApi = {
                                           { user_id: userId }).then(r => r.data),
 }
 
+// ─────────── Notifications ───────────
+export const notificationsApi = {
+  capabilities: ()           => api.get('/notifications/capabilities').then(r => r.data),
+  list:         ()           => api.get('/notifications').then(r => r.data),
+  add:          (payload)    => api.post('/notifications', payload).then(r => r.data),
+  update:       (id, payload)=> api.patch(`/notifications/${id}`, payload).then(r => r.data),
+  test:         (id)         => api.post(`/notifications/${id}/test`).then(r => r.data),
+  remove:       (id)         => api.delete(`/notifications/${id}`).then(r => r.data),
+}
+
 // ─────────── Hospital portal ───────────
 export const hospitalPortalApi = {
   me:           ()              => api.get('/hospital/me').then(r => r.data),

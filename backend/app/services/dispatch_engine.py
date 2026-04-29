@@ -31,6 +31,7 @@ from ..schemas.dispatch import DispatchPlan
 from ..sockets.sio import emit_hospital_alert
 from .ai_service import get_ai_service
 from .geo_service import estimate_zone_id, haversine_km
+from .notifications import notify_dispatch_created
 from .routing_service import RouteResult, route as road_route
 
 
@@ -250,6 +251,15 @@ async def dispatch_emergency(db: AsyncSession, emergency: Emergency,
         f"amb {best_amb.registration_number} | {best_hosp.name} | "
         f"ETA {best_eta_seconds:.0f}s"
     )
+
+    # Fire-and-forget user notifications (Telegram / email / SMS).
+    # Anything that fails inside notifications is logged on the subscription
+    # row, never bubbled — we never want a notification problem to block
+    # dispatch persistence.
+    try:
+        await notify_dispatch_created(db, dispatch, plan=None)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"notify_dispatch_created failed: {exc}")
 
     return DispatchPlan(
         dispatch_id=dispatch.id,

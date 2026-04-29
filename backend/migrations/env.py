@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.database import DATABASE_URL, Base  # noqa: E402
 from app.models import (  # noqa: E402,F401
     ambulance, audit_log, dispatch, emergency, family_link, hospital,
-    hospital_alert, medical_record, patient_profile, traffic_snapshot, user,
+    hospital_alert, medical_record, notification_subscription,
+    patient_profile, traffic_snapshot, user,
 )
 
 

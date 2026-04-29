@@ -34,6 +34,7 @@ from ..schemas.ambulance import AmbulanceOut
 from ..schemas.dispatch import DispatchOut
 from ..schemas.emergency import EmergencyOut
 from ..schemas.hospital import HospitalOut
+from ..services.notifications import notify_dispatch_status
 from ..services.routing_service import route as road_route
 from ..sockets.sio import emit_ambulance_position, emit_ambulance_status
 from .deps import require_role
@@ -250,6 +251,11 @@ async def advance_status(
     await db.refresh(dispatch)
 
     background.add_task(emit_ambulance_status, amb.id, amb.status)
+    # Patient ping (best-effort; never blocks the response).
+    try:
+        await notify_dispatch_status(db, dispatch, target)
+    except Exception:  # noqa: BLE001
+        pass
     return DispatchOut.model_validate(dispatch)
 
 
