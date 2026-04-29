@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMapEvents, useMap } from 'react-leaflet'
-import { Activity, Send, Sparkles, MapPin, Loader2, MessageSquareText, Wand2 } from 'lucide-react'
+import { Activity, Send, Sparkles, MapPin, Loader2, MessageSquareText, Wand2, Info, ChevronDown, ChevronUp } from 'lucide-react'
 
 import MapView from '../components/MapView.jsx'
 import { SeverityPill } from '../components/StatusBadge.jsx'
@@ -71,6 +71,11 @@ export default function EmergencyForm() {
   const [extracting, setExtracting] = useState(false)
   const [extractMeta, setExtractMeta] = useState(null)
 
+  // Triage explanation
+  const [explain, setExplain] = useState(null)
+  const [explainBusy, setExplainBusy] = useState(false)
+  const [showExplain, setShowExplain] = useState(false)
+
   const triagePayload = useMemo(() => ({
     age: parseInt(form.patient_age) || 40,
     gender: form.patient_gender,
@@ -104,6 +109,27 @@ export default function EmergencyForm() {
     }, 350)
     return () => clearTimeout(debounceRef.current)
   }, [triagePayload])
+
+  // Reset explain whenever the triage changes — the explanation must reflect
+  // the current SEV, not a stale one.
+  useEffect(() => { setExplain(null); setShowExplain(false) },
+           [triage?.severity_level, triage?.confidence])
+
+  async function fetchExplain() {
+    if (!triage) return
+    setShowExplain(true)
+    if (explain) return  // cached
+    setExplainBusy(true)
+    try {
+      const inline = Object.fromEntries(
+        Object.entries(triagePayload).filter(([, v]) => v !== null)
+      )
+      setExplain(await aiApi.explain({ inline }))
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Explain failed', 'critical')
+      setShowExplain(false)
+    } finally { setExplainBusy(false) }
+  }
 
   const toggleSymptom = (s) => {
     setForm(f => ({ ...f,
@@ -260,12 +286,59 @@ export default function EmergencyForm() {
               {triageBusy && <Loader2 className="w-3 h-3 animate-spin"/>}
             </div>
             {triage ? (
-              <div className="flex items-center justify-between gap-3">
-                <SeverityPill level={triage.severity_level} confidence={triage.confidence}/>
-                <span className="text-[10px] font-mono text-slate-500">
-                  {triage.used_fallback ? 'heuristic' : 'model'}
-                </span>
-              </div>
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <SeverityPill level={triage.severity_level} confidence={triage.confidence}/>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchExplain}
+                      disabled={explainBusy}
+                      className="btn-ghost text-[10px] px-2 py-1 disabled:opacity-40"
+                      title="Why this severity?"
+                    >
+                      {explainBusy
+                        ? <Loader2 className="w-3 h-3 animate-spin"/>
+                        : <Info className="w-3 h-3"/>}
+                      <span>why?</span>
+                      {showExplain
+                        ? <ChevronUp className="w-3 h-3"/>
+                        : <ChevronDown className="w-3 h-3"/>}
+                    </button>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {triage.used_fallback ? 'heuristic' : 'model'}
+                    </span>
+                  </div>
+                </div>
+                {showExplain && explain && (
+                  <div className="mt-2 pt-2 border-t border-line/30">
+                    <div className="text-xs text-slate-200 leading-relaxed mb-2">
+                      {explain.narrative}
+                    </div>
+                    {explain.factors?.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {explain.factors.slice(0, 5).map((f, i) => (
+                          <li key={i} className="flex items-center gap-2 text-[10px] font-mono">
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              f.impact === 'critical' ? 'bg-sig-critical' :
+                              f.impact === 'serious'  ? 'bg-sig-serious'  :
+                              f.impact === 'moderate' ? 'bg-sig-moderate' :
+                              'bg-slate-500'}`}/>
+                            <span className="text-slate-400">{f.name.replace('symptom:','').replace('_',' ')}</span>
+                            {f.value && !f.name.startsWith('symptom:') && (
+                              <span className="text-slate-200">{f.value}</span>
+                            )}
+                            <span className="text-slate-500">— {f.note}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="text-[9px] font-mono text-slate-600 mt-1.5">
+                      via {explain.provider}
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-sm text-slate-500">— enter vitals / symptoms —</div>
             )}
