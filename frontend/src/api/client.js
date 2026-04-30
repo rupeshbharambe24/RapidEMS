@@ -175,6 +175,22 @@ export const adminApi = {
 export const copilotApi = {
   ask: (query, context) =>
     api.post('/copilot/ask', { query, context }).then(r => r.data),
+
+  // Voice path (Phase 3.4) — multipart audio upload OR transcript text.
+  // Pass { audio: Blob, language?: string } to use Whisper, or
+  // { transcript: string } to skip transcription.
+  voice: ({ audio, transcript, language } = {}) => {
+    const fd = new FormData()
+    if (audio) {
+      const filename = `clip.${(audio.type?.split('/')[1] || 'webm').split(';')[0]}`
+      fd.append('audio', audio, filename)
+    }
+    if (transcript) fd.append('transcript', transcript)
+    if (language)   fd.append('language', language)
+    return api.post('/copilot/voice', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }
 
 // ─────────── Drones (Phase 3.6) ───────────
