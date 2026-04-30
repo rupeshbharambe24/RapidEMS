@@ -16,7 +16,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from .api import (admin, ai as ai_routes, ambulances, analytics, auth,
+from .api import (admin, ai as ai_routes, ambulances, analytics, ar, auth,
                   copilot, dispatches, driver, drones, emergencies,
                   hospital_portal, hospitals, insurance, mci, notifications,
                   patient, public, routing, telemetry, tracking)
@@ -155,6 +155,7 @@ app.include_router(telemetry.router)
 app.include_router(mci.router)
 app.include_router(drones.router)
 app.include_router(insurance.router)
+app.include_router(ar.router)
 
 
 @app.get("/", tags=["meta"])
