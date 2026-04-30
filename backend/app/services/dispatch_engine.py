@@ -32,6 +32,7 @@ from ..sockets.sio import emit_hospital_alert, emit_hospital_alert_status
 from .ai_service import get_ai_service
 from ..observability.metrics import (record_dispatch_outcome,
                                      time_dispatch)
+from .audit_chain import append as audit_append
 from .er_briefing import generate_briefing
 from .geo_service import estimate_zone_id, haversine_km
 from .ml_extras import (dispatch_match_multiplier, hospital_wait_estimate,
@@ -354,7 +355,7 @@ async def _dispatch_emergency_inner(
     best_amb.status = AmbulanceStatus.EN_ROUTE.value
     emergency.status = EmergencyStatus.DISPATCHED.value
 
-    db.add(AuditLog(
+    await audit_append(db, AuditLog(
         user_id=user_id,
         action="dispatch_created",
         entity_type="emergency",

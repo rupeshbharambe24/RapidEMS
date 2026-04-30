@@ -30,3 +30,9 @@ class User(Base):
     # POST /hospital/claim/{hospital_id} or admin assignment.
     assigned_hospital_id = Column(Integer, ForeignKey("hospitals.id"),
                                   nullable=True, index=True)
+
+    # Phase 2.2 — TOTP 2FA. Secret is a base32 string written by /auth/
+    # 2fa/setup; totp_enabled flips true after the first matching code is
+    # verified. Login then requires the 6-digit code in the request body.
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, nullable=False)

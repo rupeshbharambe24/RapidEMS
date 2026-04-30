@@ -21,6 +21,7 @@ from ..models.emergency import Emergency
 from ..models.hospital import Hospital
 from ..models.user import User, UserRole
 from ..schemas.user import UserOut
+from ..services.audit_chain import verify_chain
 from .deps import require_role
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -172,6 +173,25 @@ async def deactivate_user(
 
 
 # ── Audit log ──────────────────────────────────────────────────────────────
+class AuditVerifyOut(BaseModel):
+    ok: bool
+    first_bad_id: Optional[int] = None
+    rows_checked: int
+
+
+@router.get("/audit-log/verify", response_model=AuditVerifyOut)
+async def verify_audit_chain(
+    limit: Optional[int] = Query(None, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    """Re-walk the SHA-256 chain over audit_log. Reports whether every
+    stored row_hash still matches its computed value, and (if not) the id
+    where the chain first broke."""
+    ok, first_bad, n = await verify_chain(db, limit=limit)
+    return AuditVerifyOut(ok=ok, first_bad_id=first_bad, rows_checked=n)
+
+
 @router.get("/audit-log", response_model=List[AuditLogOut])
 async def audit_log(
     entity_type: Optional[str] = Query(None),

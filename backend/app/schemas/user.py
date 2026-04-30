@@ -26,6 +26,9 @@ class UserOut(UserBase):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    totp_code: Optional[str] = Field(default=None, pattern="^[0-9]{6}$",
+                                     description="6-digit TOTP code, "
+                                                 "required if 2FA is enabled.")
 
 
 class TokenOut(BaseModel):
