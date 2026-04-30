@@ -41,6 +41,10 @@ class Dispatch(Base):
 
     dispatcher_notes = Column(Text, nullable=True)
 
+    # Phase 2.8 — multi-tenancy.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True,
+                       index=True)
+
     emergency = relationship("Emergency", back_populates="dispatches")
     ambulance = relationship("Ambulance", back_populates="dispatches")
     hospital = relationship("Hospital", back_populates="dispatches")

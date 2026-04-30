@@ -82,7 +82,7 @@ async def create_all_tables():
         ambulance, audit_log, dispatch, emergency, family_link,
         family_link_note, hospital, hospital_alert, medical_record,
         notification_subscription, patient_profile, patient_telemetry,
-        traffic_snapshot, user,
+        tenant, traffic_snapshot, user,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

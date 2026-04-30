@@ -52,6 +52,10 @@ class Ambulance(Base):
     assigned_user_id = Column(Integer, ForeignKey("users.id"),
                               nullable=True, unique=True, index=True)
 
+    # Phase 2.8 — multi-tenancy.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True,
+                       index=True)
+
     # Equipment + maintenance
     equipment = Column(JSON, default=list)
     last_service_date = Column(DateTime, nullable=True)
