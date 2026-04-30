@@ -207,6 +207,11 @@ export const insuranceApi = {
   verify:  (payload)       => api.post('/insurance/verify', payload).then(r => r.data),
 }
 
+// ─────────── AR turn-by-turn (Phase 3.5) ───────────
+export const arApi = {
+  turnByTurn: (dispatchId) => api.get(`/ar/turn-by-turn/${dispatchId}`).then(r => r.data),
+}
+
 // ─────────── Wearable telemetry ───────────
 export const telemetryApi = {
   ingest: (readings)         => api.post('/telemetry/batch', { readings }).then(r => r.data),
