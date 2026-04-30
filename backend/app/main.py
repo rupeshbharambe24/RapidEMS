@@ -12,6 +12,9 @@ import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from .api import (admin, ai as ai_routes, ambulances, analytics, auth,
                   copilot, dispatches, driver, emergencies, hospital_portal,
@@ -20,6 +23,7 @@ from .api import (admin, ai as ai_routes, ambulances, analytics, auth,
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
+from .core.ratelimit import limiter
 from .database import AsyncSessionLocal, create_all_tables
 from .observability.metrics import (http_latency, http_requests,
                                     refresh_gauges_from_db, render_metrics)
@@ -73,6 +77,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiter (singleton lives in core.ratelimit so routers can decorate
+# without a circular import). Defaults are loose; sensitive endpoints opt
+# into tighter limits via @limiter.limit().
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.middleware("http")

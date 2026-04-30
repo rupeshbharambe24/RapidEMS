@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.security import hash_password, verify_password
+from ..core.security import hash_password, verify_and_maybe_rehash
 from ..models.user import User, UserRole
 
 
@@ -17,8 +17,13 @@ async def authenticate(db: AsyncSession, username: str,
     user = await get_user_by_username(db, username)
     if not user or not user.is_active:
         return None
-    if not verify_password(password, user.hashed_password):
+    ok, new_hash = verify_and_maybe_rehash(password, user.hashed_password)
+    if not ok:
         return None
+    if new_hash:
+        # Silent rehash from bcrypt → Argon2id on the next successful login.
+        user.hashed_password = new_hash
+        await db.commit()
     return user
 
 

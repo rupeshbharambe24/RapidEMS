@@ -1,11 +1,12 @@
 """Dispatcher copilot endpoint."""
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..core.ratelimit import limiter
 from ..database import get_db
 from ..models.user import User
 from ..services.copilot import ask
@@ -34,7 +35,9 @@ class CopilotAnswer(BaseModel):
 
 
 @router.post("/ask", response_model=CopilotAnswer)
+@limiter.limit("20/minute")    # Groq free tier is 30 RPM; leaves headroom
 async def copilot_ask(
+    request: Request,
     payload: CopilotAsk,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role("dispatcher", "admin")),
