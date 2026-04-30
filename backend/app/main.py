@@ -18,8 +18,8 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from .api import (admin, ai as ai_routes, ambulances, analytics, auth,
                   copilot, dispatches, driver, drones, emergencies,
-                  hospital_portal, hospitals, mci, notifications, patient,
-                  public, routing, telemetry, tracking)
+                  hospital_portal, hospitals, insurance, mci, notifications,
+                  patient, public, routing, telemetry, tracking)
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
@@ -154,6 +154,7 @@ app.include_router(public.router)
 app.include_router(telemetry.router)
 app.include_router(mci.router)
 app.include_router(drones.router)
+app.include_router(insurance.router)
 
 
 @app.get("/", tags=["meta"])
