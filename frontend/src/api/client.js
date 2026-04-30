@@ -103,6 +103,17 @@ export const patientApi = {
   activeEmergency:  ()         => api.get('/patient/active-emergency').then(r => r.data),
 }
 
+// ─────────── Public transparency dashboard (no auth) ───────────
+// Built with raw axios so the JWT interceptor doesn't fire for guest visitors.
+const _publicAxios = axios.create({ baseURL: '/' })
+export const publicApi = {
+  heartbeat: ()        => _publicAxios.get('/public-api/heartbeat').then(r => r.data),
+  city:      ()        => _publicAxios.get('/public-api/city').then(r => r.data),
+  zones:     (n=12)    => _publicAxios.get('/public-api/zones',
+                                           { params: { n_zones: n } }).then(r => r.data),
+  hospitals: ()        => _publicAxios.get('/public-api/hospitals').then(r => r.data),
+}
+
 // ─────────── Family tracking ───────────
 // Note: backend mounts under /track-api so the SPA route /track/:token is free.
 export const trackingApi = {
