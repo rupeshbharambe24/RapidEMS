@@ -201,6 +201,12 @@ export const dronesApi = {
                                     { emergency_id }).then(r => r.data),
 }
 
+// ─────────── Insurance (Phase 3.9) ───────────
+export const insuranceApi = {
+  payers:  ()              => api.get('/insurance/payers').then(r => r.data),
+  verify:  (payload)       => api.post('/insurance/verify', payload).then(r => r.data),
+}
+
 // ─────────── Wearable telemetry ───────────
 export const telemetryApi = {
   ingest: (readings)         => api.post('/telemetry/batch', { readings }).then(r => r.data),
