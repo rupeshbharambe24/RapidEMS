@@ -3,7 +3,7 @@
 The patient is a User with role=patient. Each user has at most one
 PatientProfile (1:1) which carries everything else.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
@@ -22,6 +22,7 @@ from ..schemas.emergency import EmergencyOut
 from ..schemas.patient import (MedicalRecordOut, PatientProfileCreate,
                                PatientProfileOut, PatientProfileUpdate,
                                RaiseEmergencyRequest, RaiseEmergencyResponse)
+from ..models.patient_telemetry import PatientTelemetry
 from ..services.dispatch_engine import DispatchError, dispatch_emergency
 from ..services.tracking_link import create_link as create_tracking_link
 from ..sockets.sio import emit_emergency_created, emit_emergency_dispatched
@@ -211,6 +212,13 @@ async def raise_sos(
         if 0 <= delta <= 130:
             age = int(delta)
 
+    # Pull the freshest wearable readings (last 6h) for any vital the
+    # patient didn't include in the SOS body. The dispatch engine reads
+    # vitals straight off the Emergency row, so this lets the severity
+    # classifier benefit from continuous wearable data without the patient
+    # having to retype anything.
+    telemetry_pull = await _latest_recent_telemetry(db, profile) if profile else {}
+
     emergency = Emergency(
         patient_name=profile.full_name if profile else user.full_name,
         patient_age=age,
@@ -223,6 +231,11 @@ async def raise_sos(
         chief_complaint=payload.chief_complaint,
         symptoms=payload.symptoms,
         notes=payload.raw_transcript,
+        pulse_rate=telemetry_pull.get("heart_rate"),
+        spo2=telemetry_pull.get("spo2"),
+        blood_pressure_systolic=telemetry_pull.get("bp_sys"),
+        blood_pressure_diastolic=telemetry_pull.get("bp_dia"),
+        respiratory_rate=telemetry_pull.get("rr"),
     )
     db.add(emergency)
     await db.commit()
@@ -309,6 +322,35 @@ async def _require_profile(db: AsyncSession, user: User) -> PatientProfile:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             detail="Create your patient profile first (POST /patient/me).")
     return profile
+
+
+async def _latest_recent_telemetry(db: AsyncSession,
+                                    profile: PatientProfile) -> dict:
+    """Walk telemetry rows from the last 6 hours and return the freshest
+    non-null value for each vital the dispatch engine consumes."""
+    cutoff = datetime.utcnow() - timedelta(hours=6)
+    rows = list((await db.scalars(
+        select(PatientTelemetry)
+        .where(PatientTelemetry.patient_id == profile.id,
+               PatientTelemetry.recorded_at >= cutoff)
+        .order_by(PatientTelemetry.recorded_at.desc())
+        .limit(120)
+    )).all())
+    out: dict = {}
+    for r in rows:
+        if "heart_rate" not in out and r.heart_rate is not None:
+            out["heart_rate"] = r.heart_rate
+        if "spo2" not in out and r.spo2 is not None:
+            out["spo2"] = r.spo2
+        if ("bp_sys" not in out and r.blood_pressure_systolic is not None
+                and r.blood_pressure_diastolic is not None):
+            out["bp_sys"] = r.blood_pressure_systolic
+            out["bp_dia"] = r.blood_pressure_diastolic
+        if "rr" not in out and r.respiratory_rate is not None:
+            out["rr"] = r.respiratory_rate
+        if all(k in out for k in ("heart_rate", "spo2", "bp_sys", "rr")):
+            break
+    return out
 
 
 def _sanitise_filename(name: str) -> str:
