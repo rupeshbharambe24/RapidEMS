@@ -53,13 +53,26 @@ dispatcher chooses to parse a transcript.
 │  http://localhost:8000   /docs for OpenAPI explorer                  │
 │                                                                      │
 │  api/        auth, emergencies, ambulances, hospitals, dispatches,   │
-│              ai (incl. /ai/extract), analytics                       │
-│  services/   ai_service        – loads 5 ML models, heuristic fallbk │
+│              ai, analytics, routing, patient, driver, hospital,      │
+│              admin, notifications, tracking, copilot, public,        │
+│              telemetry, mci, drones, insurance, ar                   │
+│  services/   ai_service        – 5 ML models + heuristic fallbacks   │
 │              llm_extractor     – Groq → Gemini → heuristic skim      │
-│              dispatch_engine   – orchestrator                        │
-│              auth_service, geo_service                               │
-│  sockets/    sio.py            – live channels                       │
-│  models/     7 SQLAlchemy ORM tables                                 │
+│              dispatch_engine   – orchestrator (severity/ETA/hosp)    │
+│              multi_dispatch    – Hungarian over PENDING × AVAILABLE  │
+│              staging           – LSTM-driven pre-positioning         │
+│              copilot           – Groq tool-calling dispatcher copilot│
+│              voice_transcribe  – Groq Whisper for /copilot/voice     │
+│              drone_recon       – pre-arrival aerial scene preview    │
+│              demo_runner       – cinematic scenarios + replay        │
+│              chaos             – fault-injection lab                 │
+│              insurance         – EDI-271 eligibility (stub registry) │
+│              ar_navigation     – polyline → AR waypoints             │
+│              mci, ml_extras, severity_explainer, er_briefing,        │
+│              tracking_link, notifications, audit_chain, policy,      │
+│              data_retention, tenant, auth_service, geo_service       │
+│  sockets/    sio.py            – live channels (15+)                 │
+│  models/     16 SQLAlchemy ORM tables                                │
 │  schemas/    Pydantic v2 request/response                            │
 └────┬─────────────────┬────────────────────────────────┬──────────────┘
      │                 │                                │
@@ -266,6 +279,51 @@ OpenAPI explorer at `http://localhost:8000/docs`.
 - `GET   /analytics/kpis`
 - `GET   /analytics/hotspots` — LSTM heatmap data per zone
 
+**Multi-emergency optimisation & predictive staging**
+- `POST  /dispatches/optimize?execute=…` — Hungarian assignment over all PENDING calls × AVAILABLE units
+- `GET   /dispatches/staging/preview?horizon_hours=…` — LSTM-driven pre-positioning advisories
+- `POST  /dispatches/staging/apply` — same plus `staging:position` Socket.IO emit per drone-… ambulance
+
+**MCI command (Mass-Casualty Incidents)**
+- `POST  /mci/declare`, `POST /mci/{id}/close`, `GET /mci`
+- `POST  /mci/victims` — START algorithm classifies into red / yellow / green / black
+- `POST  /mci/optimize` (preview), `POST /mci/execute` (Hungarian over the live victim queue)
+
+**Voice-first dispatcher copilot**
+- `POST  /copilot/ask` — Groq tool-calling over read-only fleet/hospital/emergency tools
+- `POST  /copilot/voice` — multipart audio (Groq Whisper v3-turbo) **or** transcript path → reuses `/ask`
+
+**Drone reconnaissance**
+- `GET   /drones`, `GET /drones/active`
+- `POST  /drones/dispatch` — manual; auto-launch fires from `/emergencies` for SEV-1 / MCI / fire / RTA
+
+**Insurance verification (EDI-271 shape)**
+- `POST  /insurance/verify` — payer + plan tier + in-network hospital IDs
+- `GET   /insurance/payers`
+
+**AR turn-by-turn overlay**
+- `GET   /ar/turn-by-turn/{dispatch_id}` — origin / destination / sequenced waypoints with bearings + turn cues
+
+**Cinematic demo + replay (admin)**
+- `GET   /admin/demo/scenarios`, `POST /admin/demo/start`, `GET /admin/demo/status`, `POST /admin/demo/stop`
+- `GET   /admin/replay`, `POST /admin/replay/start`, `GET /admin/replay/status` — re-emits captured Socket.IO frames at any speed
+
+**Chaos lab (admin)**
+- `GET   /admin/chaos`, `POST /admin/chaos/inject`, `POST /admin/chaos/clear?scenario=…`
+  Scenarios: `routing_provider_down`, `severity_predictor_slow`, `dispatch_failure_rate`
+
+**Patient / driver / hospital portals**
+- `/patient/*` — patient self-service profile + medical record + tracking links
+- `/driver/*` — claim/release a unit, push GPS, status transitions
+- `/hospital/*` — alert acknowledge / accept / divert from inbound dispatches
+- `/track/{token}` — public family-facing tracking link (signed, time-limited)
+
+**Public + telemetry + admin**
+- `/public-api/*` — anonymised city dashboard data
+- `/telemetry/*` — Patient-monitor vitals stream
+- `/admin/*` — users, audit log, retention sweep, export bundle, erasure, ambulance assign
+- `/metrics` — Prometheus scrape target
+
 ---
 
 ## 8. Real-time channels (Socket.IO at `/socket.io`)
@@ -277,6 +335,13 @@ OpenAPI explorer at `http://localhost:8000/docs`.
 | `emergency:created` | full intake payload (location, symptoms, …) |
 | `emergency:dispatched` | full DispatchPlan |
 | `hospital:beds_updated` | `{ hospital_id, available_beds_*, … }` |
+| `hospital:alert` | pre-arrival ER briefing (Gemini text + structured fields) |
+| `hospital:alert_status` | acknowledged / accepted / diverted |
+| `staging:position` | predictive pre-positioning advisory for an idle unit |
+| `mci:declared` / `mci:victim_registered` | MCI command stream |
+| `drone:position` / `drone:status` / `drone:scene_preview` | recon overlay |
+| `demo:narration` / `demo:finished` | cinematic-demo subtitles + completion |
+| `replay:finished` | captured-session re-emit completed |
 
 Handlers in `frontend/src/api/socket.js` mutate the corresponding Zustand
 stores directly, so every page reflects changes without prop drilling.
