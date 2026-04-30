@@ -66,3 +66,12 @@ async def emit_hospital_alert(payload: dict):
 async def emit_hospital_alert_status(payload: dict):
     """Acknowledged / accepted / diverted — keeps dispatcher dashboards in sync."""
     await sio.emit("hospital:alert_status", payload)
+
+
+async def emit_staging_position(payload: dict):
+    """Predictive-pre-positioning advisory for an idle ambulance.
+
+    Phase 3.2 — drivers' dashboards surface the suggested move. The
+    unit's status doesn't change; a live dispatch can override at any
+    time."""
+    await sio.emit("staging:position", payload)
