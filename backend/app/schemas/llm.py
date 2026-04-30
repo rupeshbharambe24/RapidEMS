@@ -15,6 +15,32 @@ class TranscriptIn(BaseModel):
     )
 
 
+class MultimodalIn(BaseModel):
+    """Same intake parser, but with optional image/audio bytes attached.
+
+    At least one of ``transcript``, ``image_base64``, ``audio_base64`` must be
+    supplied. Multimodal inputs force the Gemini provider (Groq is text-only)
+    and a single round trip parses every modality together — a photo of an
+    injury alongside a Hindi voice note alongside the dispatcher's typed
+    notes all collapse into one structured ExtractedEmergency.
+    """
+    transcript: Optional[str] = Field(default=None, max_length=8000)
+    language_hint: Optional[str] = None
+
+    image_base64: Optional[str] = Field(default=None,
+        description="Standard base64 (no data: prefix). Up to ~4 MB.",
+    )
+    image_mime: Optional[str] = Field(default="image/jpeg",
+        description="image/jpeg | image/png | image/webp | image/heic.")
+
+    audio_base64: Optional[str] = Field(default=None,
+        description="Standard base64 (no data: prefix). Up to ~4 MB.",
+    )
+    audio_mime: Optional[str] = Field(default="audio/mpeg",
+        description="audio/mpeg | audio/wav | audio/ogg | audio/aac | "
+                    "audio/flac | audio/webm.")
+
+
 class ExtractedEmergency(BaseModel):
     """LLM-parsed emergency intake. Fields mirror EmergencyCreate where they exist."""
 

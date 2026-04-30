@@ -73,6 +73,8 @@ export const aiApi = {
   hotspot:  (zone_id) => api.get('/ai/hotspots', { params: { zone_id } }).then(r => r.data),
   extract:  (transcript, language_hint) =>
     api.post('/ai/extract', { transcript, language_hint }).then(r => r.data),
+  extractMultimodal: (payload) =>
+    api.post('/ai/extract-multimodal', payload).then(r => r.data),
   explain:  (payload) => api.post('/ai/explain', payload).then(r => r.data),
 }
 
