@@ -154,6 +154,21 @@ export const adminApi = {
   auditLog:        (params)            => api.get('/admin/audit-log', { params }).then(r => r.data),
   assignAmbulance: (ambId, userId)     => api.patch(`/admin/ambulances/${ambId}/assign`,
                                           { user_id: userId }).then(r => r.data),
+
+  // Chaos lab (Phase 3.10)
+  chaosState:      ()                  => api.get('/admin/chaos').then(r => r.data),
+  chaosInject:     (payload)           => api.post('/admin/chaos/inject', payload).then(r => r.data),
+  chaosClear:      (scenario)          => api.post('/admin/chaos/clear',
+                                          null, { params: scenario ? { scenario } : {} }).then(r => r.data),
+
+  // Cinematic demo + replay (Phase 3.1)
+  demoScenarios:   ()                  => api.get('/admin/demo/scenarios').then(r => r.data),
+  demoStart:       (payload)           => api.post('/admin/demo/start', payload).then(r => r.data),
+  demoStatus:      ()                  => api.get('/admin/demo/status').then(r => r.data),
+  demoStop:        ()                  => api.post('/admin/demo/stop').then(r => r.data),
+  replayList:      ()                  => api.get('/admin/replay').then(r => r.data),
+  replayStart:     (payload)           => api.post('/admin/replay/start', payload).then(r => r.data),
+  replayStatus:    ()                  => api.get('/admin/replay/status').then(r => r.data),
 }
 
 // ─────────── Copilot ───────────
