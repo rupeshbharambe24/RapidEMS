@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react'
 
 import { trackingApi } from '../api/client.js'
+import LangPicker from '../components/LangPicker.jsx'
 
 // ── Markers ───────────────────────────────────────────────────────────────
 const ambIcon = L.divIcon({
@@ -30,18 +32,18 @@ function FlyTo({ to }) {
   return null
 }
 
-const STATUS_LABEL = {
-  dispatched:        'Ambulance dispatched',
-  en_route:          'On the way',
-  on_scene:          'Crew is on scene',
-  transporting:      'Transporting to hospital',
-  arrived_hospital:  'Arrived at hospital',
-  completed:         'Trip complete',
-  cancelled:         'Trip cancelled',
-}
-
 export default function FamilyTracking() {
   const { token } = useParams()
+  const { t } = useTranslation()
+  const STATUS_LABEL = {
+    dispatched:        t('track.status_dispatched'),
+    en_route:          t('track.status_en_route'),
+    on_scene:          t('track.status_on_scene'),
+    transporting:      t('track.status_transporting'),
+    arrived_hospital:  t('track.status_arrived_hospital'),
+    completed:         t('track.status_completed'),
+    cancelled:         t('track.status_cancelled'),
+  }
   const [snap, setSnap] = useState(null)
   const [error, setError] = useState(null)
   const intervalRef = useRef(null)
@@ -77,7 +79,7 @@ export default function FamilyTracking() {
     return (
       <CenterScreen>
         <Loader2 className="w-6 h-6 animate-spin text-cyan-400"/>
-        <div className="text-sm text-slate-400">Loading tracking…</div>
+        <div className="text-sm text-slate-400">{t('track.loading')}</div>
       </CenterScreen>
     )
   }
@@ -99,7 +101,7 @@ export default function FamilyTracking() {
           <Heart className="w-5 h-5 text-sig-critical animate-pulse"/>
           <div className="flex-1 min-w-0">
             <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400">
-              live tracking
+              {t('track.header')}
             </div>
             <div className="text-sm font-semibold truncate">
               {snap.patient_first_name
@@ -107,11 +109,14 @@ export default function FamilyTracking() {
                 : statusLabel}
             </div>
           </div>
+          <LangPicker compact/>
           {snap.eta_minutes != null && snap.dispatch_status !== 'completed' && (
             <div className="text-right">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">eta</div>
+              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                {t('track.eta_label')}
+              </div>
               <div className="text-2xl font-bold text-cyan-300 leading-none">
-                {snap.eta_minutes.toFixed(1)}<span className="text-sm text-slate-400 ml-1">min</span>
+                {snap.eta_minutes.toFixed(1)}<span className="text-sm text-slate-400 ml-1">{t('common.minutes_short')}</span>
               </div>
             </div>
           )}
@@ -180,23 +185,23 @@ export default function FamilyTracking() {
                 <a href={`https://www.google.com/maps/dir/?api=1&destination=${snap.hospital_lat},${snap.hospital_lng}`}
                    target="_blank" rel="noreferrer"
                    className="ml-6 mt-0.5 text-[11px] text-cyan-300 inline-flex items-center gap-1">
-                  <MapPin className="w-3 h-3"/>directions
+                  <MapPin className="w-3 h-3"/>{t('track.directions')}
                 </a>
               )}
             </div>
           )}
           {snap.severity_level && (
             <div className="text-[11px] text-slate-400 mt-2">
-              Severity: <span className="font-mono">SEV-{snap.severity_level}</span>
+              {t('track.severity_label')}: <span className="font-mono">SEV-{snap.severity_level}</span>
             </div>
           )}
           {snap.last_gps_update && (
             <div className="text-[10px] font-mono text-slate-500 mt-2">
-              Last GPS update {new Date(snap.last_gps_update).toLocaleTimeString()}
+              {t('track.last_gps', { time: new Date(snap.last_gps_update).toLocaleTimeString() })}
             </div>
           )}
           <div className="text-[10px] font-mono text-slate-500 mt-2">
-            Link expires in ~{expiresMin}m
+            {t('track.expires_in', { min: expiresMin })}
           </div>
         </div>
 
@@ -210,6 +215,7 @@ export default function FamilyTracking() {
 
 
 function NotesPanel({ snap, token, onAdded }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -245,7 +251,7 @@ function NotesPanel({ snap, token, onAdded }) {
       <button type="button" onClick={() => setOpen(o => !o)}
               className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.16em] text-slate-300">
         <MessageSquare className="w-3 h-3 text-cyan-300"/>
-        notes ({notes.length})
+        {t('track.notes_title')} ({notes.length})
         <span className="text-slate-500 ml-auto">{open ? '▾' : '▸'}</span>
       </button>
 
@@ -254,7 +260,7 @@ function NotesPanel({ snap, token, onAdded }) {
           <div className="flex-1 overflow-y-auto mt-2 space-y-1.5">
             {notes.length === 0 && (
               <div className="text-[11px] text-slate-500 italic">
-                Leave a quick update for the patient + dispatcher.
+                {t('track.notes_empty')}
               </div>
             )}
             {notes.map((n, i) => (
@@ -281,11 +287,11 @@ function NotesPanel({ snap, token, onAdded }) {
 
           <form onSubmit={send} className="mt-2 pt-2 border-t border-line/30 space-y-1.5">
             <input type="text" value={name} onChange={e => setName(e.target.value)}
-                   placeholder="your name (optional)"
+                   placeholder={t('track.your_name')}
                    className="field !py-1 text-xs"/>
             <div className="flex gap-1.5">
               <input type="text" value={draft} onChange={e => setDraft(e.target.value)}
-                     maxLength={400} placeholder="quick update…"
+                     maxLength={400} placeholder={t('track.quick_update')}
                      className="field !py-1 text-xs flex-1"/>
               <button type="submit" disabled={busy || !draft.trim()}
                       className="btn-ghost !px-2 !py-1 text-xs disabled:opacity-40">
@@ -310,6 +316,7 @@ function CenterScreen({ children }) {
 }
 
 function ErrorScreen({ detail }) {
+  const { t } = useTranslation()
   const isRevoked = /revoked/i.test(detail)
   const isExpired = /expired/i.test(detail)
   return (
@@ -320,11 +327,12 @@ function ErrorScreen({ detail }) {
           : isExpired
             ? <Clock className="w-12 h-12 mx-auto text-amber-400 mb-3"/>
             : <AlertCircle className="w-12 h-12 mx-auto text-sig-critical mb-3"/>}
-        <div className="text-lg font-bold mb-1">Tracking unavailable</div>
+        <div className="text-lg font-bold mb-1">{t('track.unavailable')}</div>
         <div className="text-sm text-slate-400">{detail}</div>
         <div className="text-xs text-slate-500 mt-3">
-          Ask the patient to share a fresh link.
+          {t('track.ask_fresh')}
         </div>
+        <div className="mt-4"><LangPicker/></div>
       </div>
     </div>
   )

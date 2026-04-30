@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Activity, AlertTriangle, Building2, Truck, Bed, Hospital as HospitalIcon,
   Clock, MapPin, RefreshCw, ShieldOff, Heart,
 } from 'lucide-react'
 
 import { publicApi } from '../api/client.js'
+import LangPicker from '../components/LangPicker.jsx'
 
 const TICK_MS = 15000  // refresh cadence
 
 export default function PublicDashboard() {
+  const { t } = useTranslation()
   const [city, setCity] = useState(null)
   const [zones, setZones] = useState([])
   const [hospitals, setHospitals] = useState([])
@@ -47,10 +50,11 @@ export default function PublicDashboard() {
           <Heart className="w-5 h-5 text-sig-critical animate-pulse"/>
           <div className="flex-1">
             <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400">
-              public transparency
+              {t('city.header_eyebrow')}
             </div>
-            <div className="text-sm font-semibold">RapidEMS · live city snapshot</div>
+            <div className="text-sm font-semibold">{t('city.header_subtitle')}</div>
           </div>
+          <LangPicker compact/>
           <div className="text-[10px] font-mono text-slate-500 inline-flex items-center gap-1">
             <RefreshCw className="w-3 h-3"/>
             {city ? new Date(city.last_updated).toLocaleTimeString() : '—'}
@@ -69,30 +73,36 @@ export default function PublicDashboard() {
         <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat
             icon={Activity}
-            label="Active calls"
+            label={t('city.kpi_active')}
             value={(city?.active_emergencies ?? 0) + (city?.pending_emergencies ?? 0)}
-            hint={`${city?.pending_emergencies ?? 0} pending · ${city?.active_emergencies ?? 0} en route`}
+            hint={t('city.kpi_active_hint', {
+              pending: city?.pending_emergencies ?? 0,
+              active: city?.active_emergencies ?? 0,
+            })}
             tint={(city?.pending_emergencies ?? 0) > 0 ? 'red' : 'cyan'}
           />
           <Stat
             icon={Truck}
-            label="Available units"
+            label={t('city.kpi_units')}
             value={city?.available_ambulances ?? '—'}
-            hint={`${city?.busy_ambulances ?? 0} busy`}
+            hint={t('city.kpi_units_hint', { busy: city?.busy_ambulances ?? 0 })}
             tint={(city?.available_ambulances ?? 0) <= 2 ? 'amber' : 'emerald'}
           />
           <Stat
             icon={Clock}
-            label="Avg response (last hour)"
+            label={t('city.kpi_response')}
             value={minOf(city?.avg_response_time_last_hour_seconds)}
-            hint={`${city?.calls_last_hour ?? 0} call(s) this hour`}
+            hint={t('city.kpi_response_hint', { count: city?.calls_last_hour ?? 0 })}
             tint="cyan"
           />
           <Stat
             icon={ShieldOff}
-            label="On diversion"
+            label={t('city.kpi_diversion')}
             value={`${city?.hospitals_on_diversion ?? 0}/${city?.hospitals_total ?? 0}`}
-            hint={`${city?.icu_beds_available ?? 0} ICU · ${city?.general_beds_available ?? 0} general beds`}
+            hint={t('city.kpi_diversion_hint', {
+              icu: city?.icu_beds_available ?? 0,
+              general: city?.general_beds_available ?? 0,
+            })}
             tint={(city?.hospitals_on_diversion ?? 0) > 0 ? 'amber' : 'slate'}
           />
         </section>
@@ -101,9 +111,9 @@ export default function PublicDashboard() {
         <section className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <MapPin className="w-5 h-5 text-cyan-400"/>
-            <h2 className="text-xl font-bold">Activity by zone</h2>
+            <h2 className="text-xl font-bold">{t('city.zones_title')}</h2>
             <span className="text-xs text-slate-500 font-mono ml-auto">
-              {zones.length} zones · last 24h
+              {t('city.zones_subtitle', { count: zones.length })}
             </span>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
@@ -133,7 +143,7 @@ export default function PublicDashboard() {
             })}
           </div>
           <div className="text-[10px] font-mono text-slate-500 mt-3">
-            Cells coloured by combined active + recent activity. No incident-level data is shown.
+            {t('city.zones_help')}
           </div>
         </section>
 
@@ -141,9 +151,9 @@ export default function PublicDashboard() {
         <section className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <HospitalIcon className="w-5 h-5 text-emerald-400"/>
-            <h2 className="text-xl font-bold">Hospital availability</h2>
+            <h2 className="text-xl font-bold">{t('city.hospitals_title')}</h2>
             <span className="text-xs text-slate-500 font-mono ml-auto">
-              {hospitals.length} facilities
+              {t('city.hospitals_subtitle', { count: hospitals.length })}
             </span>
           </div>
           <div className="grid sm:grid-cols-2 gap-3">
@@ -161,7 +171,7 @@ export default function PublicDashboard() {
                       </div>
                       {h.is_diversion && (
                         <div className="text-[10px] font-mono uppercase text-amber-300 mt-1">
-                          on diversion
+                          {t('city.on_diversion')}
                         </div>
                       )}
                     </div>
@@ -173,7 +183,7 @@ export default function PublicDashboard() {
                             available={h.available_beds_icu} total={h.total_beds_icu}/>
                   </div>
                   <div className="text-[10px] font-mono text-slate-500 mt-2">
-                    ER wait ≈ {h.er_wait_minutes}m
+                    {t('city.er_wait', { min: h.er_wait_minutes })}
                   </div>
                 </div>
               )
@@ -182,7 +192,7 @@ export default function PublicDashboard() {
         </section>
 
         <footer className="text-center text-[10px] font-mono text-slate-600 pt-4">
-          Auto-refreshes every {TICK_MS / 1000} seconds. No personal information shown.
+          {t('city.footer', { seconds: TICK_MS / 1000 })}
         </footer>
       </main>
     </div>

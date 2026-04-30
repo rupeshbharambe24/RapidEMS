@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   AlertCircle, Heart, FileText, Upload, Trash2, MapPin, Phone,
   ShieldAlert, Loader2, LogOut, Activity, Clock, CheckCircle2,
@@ -10,6 +11,7 @@ import {
 import { patientApi, notificationsApi, trackingApi, telemetryApi } from '../api/client.js'
 import { useAuthStore } from '../store/auth.js'
 import { useUiStore } from '../store/ui.js'
+import LangPicker from '../components/LangPicker.jsx'
 
 const RECORD_TYPES = [
   { v: 'mri',                label: 'MRI' },
@@ -32,6 +34,7 @@ const initialProfile = {
 
 export default function PatientDashboard() {
   const nav = useNavigate()
+  const { t } = useTranslation()
   const user = useAuthStore(s => s.user)
   const logout = useAuthStore(s => s.logout)
   const toast = useUiStore(s => s.toast)
@@ -163,13 +166,14 @@ export default function PatientDashboard() {
           <Heart className="w-5 h-5 text-sig-critical"/>
           <div className="flex-1">
             <div className="text-[11px] font-mono uppercase tracking-[0.16em] text-slate-400">
-              RapidEMS · patient
+              RapidEMS · {t('patient.header_role')}
             </div>
             <div className="text-sm font-semibold">{user?.full_name || user?.username}</div>
           </div>
+          <LangPicker compact/>
           <button onClick={() => { logout(); nav('/login') }}
                   className="btn-ghost text-xs px-3 py-1.5">
-            <LogOut className="w-3.5 h-3.5"/>logout
+            <LogOut className="w-3.5 h-3.5"/>{t('common.logout')}
           </button>
         </div>
       </header>
@@ -181,15 +185,15 @@ export default function PatientDashboard() {
             <div className="flex items-center gap-3 mb-2">
               <Activity className="w-5 h-5 text-sig-critical"/>
               <div className="text-[11px] font-mono uppercase tracking-[0.16em] text-sig-critical">
-                Active emergency
+                {t('patient.active_emergency')}
               </div>
             </div>
             <div className="text-lg font-semibold">
-              Help is on the way — emergency #{active.id}
+              {t('patient.help_on_the_way', { id: active.id })}
             </div>
             <div className="text-sm text-slate-400 mt-1">
-              Severity {active.predicted_severity ?? '—'} ·
-              status <span className="font-mono">{active.status}</span>
+              {t('patient.severity_status', { sev: active.predicted_severity ?? '—' })}
+              {' '}<span className="font-mono">{active.status}</span>
             </div>
           </div>
         )}
@@ -198,17 +202,14 @@ export default function PatientDashboard() {
         <section className="card p-6 border-sig-critical/30">
           <div className="flex items-center gap-3 mb-4">
             <ShieldAlert className="w-6 h-6 text-sig-critical"/>
-            <h2 className="text-xl font-bold">Emergency SOS</h2>
+            <h2 className="text-xl font-bold">{t('patient.sos_title')}</h2>
           </div>
-          <p className="text-sm text-slate-400 mb-4">
-            One tap dispatches the nearest ambulance to your current location and
-            alerts the best-fit hospital with your medical record summary.
-          </p>
+          <p className="text-sm text-slate-400 mb-4">{t('patient.sos_desc')}</p>
           <div className="flex items-center gap-3 mb-4 text-xs font-mono text-slate-500">
             <MapPin className="w-3.5 h-3.5"/>
             {coords
-              ? `GPS lock ${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`
-              : 'awaiting GPS permission…'}
+              ? t('patient.gps_lock', { lat: coords[0].toFixed(4), lng: coords[1].toFixed(4) })
+              : t('patient.gps_waiting')}
           </div>
           <button
             onClick={raiseSos}
@@ -217,10 +218,10 @@ export default function PatientDashboard() {
                        disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-red transition-all"
           >
             {sosBusy
-              ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin"/>dispatching…</span>
+              ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin"/>{t('patient.sos_dispatching')}</span>
               : active
-                ? 'help is already on the way'
-                : 'RAISE SOS NOW'}
+                ? t('patient.sos_already')
+                : t('patient.sos_button')}
           </button>
         </section>
 
