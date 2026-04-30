@@ -44,6 +44,13 @@ class DispatchPlan(BaseModel):
     used_fallback: bool = False
     notes: Optional[str] = None
 
+    # Phase 1.6 ─ extra ML signals
+    survival_prob_30d: Optional[float] = None
+    equipment_score: Optional[float] = None
+    missing_equipment: Optional[list[str]] = None
+    skill_bonus: Optional[float] = None
+    predicted_er_wait_minutes: Optional[int] = None
+
 
 class RoutePreview(BaseModel):
     """Response for the GET /routing/preview endpoint."""

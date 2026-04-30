@@ -14,7 +14,7 @@ This is the only place where the 5 ML models meaningfully come together.
 """
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,8 @@ from ..sockets.sio import emit_hospital_alert, emit_hospital_alert_status
 from .ai_service import get_ai_service
 from .er_briefing import generate_briefing
 from .geo_service import estimate_zone_id, haversine_km
+from .ml_extras import (dispatch_match_multiplier, hospital_wait_estimate,
+                        outcome_probability)
 from .notifications import notify_dispatch_created
 from .routing_service import RouteResult, route as road_route
 
@@ -182,6 +184,11 @@ async def dispatch_emergency(
 
     # Score each candidate by blending road ETA with ML ETA per the configured
     # weight. Falls back to ML-only when the routing chain only had haversine.
+    # The blended ETA is then nudged by the equipment + paramedic-skill match
+    # multiplier — a perfectly-equipped, ALS-certified crew on a cardiac call
+    # gets an effective ~25% ETA bonus over a BLS unit even at the same
+    # distance, which steers the picker toward the right vehicle.
+    best_match_detail: Optional[Dict] = None
     for amb, (cur_lat, cur_lng), rr in zip(candidates, starts, routes):
         road_km = rr.meters / 1000.0
         d_km = haversine_km(cur_lat, cur_lng,
@@ -196,12 +203,21 @@ async def dispatch_emergency(
         used_fallback = used_fallback or eta["used_fallback"] or rr.used_fallback
         w = settings.eta_road_weight if not rr.used_fallback else 0.0
         blended = w * rr.seconds + (1.0 - w) * eta["eta_seconds"]
-        if blended < best_eta_seconds:
-            best_eta_seconds = blended
+
+        match_mult, match_detail = dispatch_match_multiplier(
+            patient_type=patient_type,
+            ambulance_equipment=amb.equipment,
+            paramedic_certification=amb.paramedic_certification,
+        )
+        scored = blended * match_mult
+
+        if scored < best_eta_seconds:
+            best_eta_seconds = scored
             best_amb = amb
             best_distance_km = d_km
             best_road_meters = rr.meters
             best_route = rr
+            best_match_detail = match_detail
 
     # ── 4. Pick the best capable hospital ─────────────────
     candidate_hospitals = (await db.scalars(
@@ -212,18 +228,44 @@ async def dispatch_emergency(
 
     best_hosp = None
     best_score = -1.0
+    best_hospital_wait: Optional[int] = None
     for h in candidate_hospitals:
         d_h = haversine_km(emergency.location_lat, emergency.location_lng,
                             h.lat, h.lng)
         scored = ai.score_hospital(patient_type=patient_type,
                                    hospital=h, distance_km=d_h)
         used_fallback = used_fallback or scored["used_fallback"]
-        if scored["score"] > best_score:
-            best_score = scored["score"]
+
+        # Refine the static er_wait_minutes with a time-of-day curve so a
+        # 5pm weekday call avoids the ER everyone else is also flooding.
+        wait = hospital_wait_estimate(
+            base_er_wait_minutes=h.er_wait_minutes or 0,
+            is_diversion=h.is_diversion, when=now,
+        )
+        # Penalty: each predicted minute of wait shaves up to 0.005 off the
+        # recommender score (so 60-min wait ≈ −0.30 score).
+        penalty = min(0.30, wait["predicted_wait_minutes"] * 0.005)
+        adj_score = scored["score"] - penalty
+
+        if adj_score > best_score:
+            best_score = adj_score
             best_hosp = h
+            best_hospital_wait = wait["predicted_wait_minutes"]
 
     if best_hosp is None:
         raise DispatchError("Could not score any hospital.")
+
+    # Outcome predictor — surfaces on the dispatch plan + audit log so the
+    # dispatcher can see the model's 30-day survival probability for this case.
+    outcome = outcome_probability(
+        severity_level=severity_level,
+        age=emergency.patient_age,
+        spo2=emergency.spo2,
+        pulse_rate=emergency.pulse_rate,
+        respiratory_rate=emergency.respiratory_rate,
+        blood_pressure_systolic=emergency.blood_pressure_systolic,
+        gcs_score=emergency.gcs_score,
+    )
 
     # ── 5. Persist Dispatch + side effects ────────────────
     dispatch = Dispatch(
@@ -323,4 +365,9 @@ async def dispatch_emergency(
         congestion=round(best_route.congestion, 3) if best_route else None,
         polyline=best_route.polyline if best_route else None,
         used_fallback=used_fallback,
+        survival_prob_30d=outcome["survival_prob_30d"],
+        equipment_score=best_match_detail["equipment_score"] if best_match_detail else None,
+        missing_equipment=best_match_detail["missing_equipment"] if best_match_detail else None,
+        skill_bonus=best_match_detail["skill_bonus"] if best_match_detail else None,
+        predicted_er_wait_minutes=best_hospital_wait,
     )
