@@ -80,7 +80,7 @@ async def create_all_tables():
     # Importing the model modules registers them with Base.metadata.
     from .models import (  # noqa: F401
         ambulance, audit_log, dispatch, emergency, family_link,
-        family_link_note, hospital, hospital_alert, medical_record,
+        family_link_note, hospital, hospital_alert, mci, medical_record,
         notification_subscription, patient_profile, patient_telemetry,
         tenant, traffic_snapshot, user,
     )
