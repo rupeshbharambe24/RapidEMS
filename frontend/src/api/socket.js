@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client'
 
 import { useAmbulancesStore } from '../store/ambulances.js'
+import { useDronesStore } from '../store/drones.js'
 import { useEmergenciesStore } from '../store/emergencies.js'
 import { useHospitalsStore } from '../store/hospitals.js'
 import { useUiStore } from '../store/ui.js'
@@ -56,6 +57,26 @@ export function connectSocket() {
   })
   socket.on('hospital:beds_updated', (msg) => {
     useHospitalsStore.getState().updateBeds(msg.hospital_id, msg)
+  })
+
+  // ── Drone reconnaissance (Phase 3.6) ──
+  socket.on('drone:position', (msg) => {
+    useDronesStore.getState().upsertPosition(msg)
+  })
+  socket.on('drone:status', (msg) => {
+    useDronesStore.getState().setStatus(msg)
+    if (msg.status === 'en_route' && msg.emergency_id) {
+      useUiStore.getState().toast(
+        `${msg.registration || 'Drone'} en-route to scene · ETA ${
+          Math.round(msg.eta_seconds || 0)}s`, 'info')
+    }
+  })
+  socket.on('drone:scene_preview', (preview) => {
+    useDronesStore.getState().addPreview(preview)
+    useUiStore.getState().toast(
+      `Aerial: ~${preview.victim_estimate} victim(s)${
+        preview.hazards?.length ? ` · ${preview.hazards.join(', ')}` : ''}`,
+      preview.hazards?.length ? 'critical' : 'info')
   })
 
   return socket
