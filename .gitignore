@@ -55,5 +55,8 @@ notebooks/catboost_info/
 # Patient uploads (per-user PHI; never goes in git)
 backend/uploads/
 
+# Demo replay captures (regenerated from /admin/demo/start)
+backend/replays/
+
 # Windows / git-bash crash dumps
 *.stackdump
