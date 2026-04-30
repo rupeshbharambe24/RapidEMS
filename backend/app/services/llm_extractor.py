@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from ..config import settings
 from ..core.logging import log
+from ..observability.metrics import record_llm
 from ..schemas.llm import ExtractedEmergency
 
 
@@ -126,11 +127,15 @@ class LLMExtractor:
                         t0 = time.perf_counter()
                         raw = await self._call_groq(client, user_msg)
                         parsed = self._parse_to_schema(raw)
+                        latency_ms = int((time.perf_counter() - t0) * 1000)
+                        record_llm("groq", "extract", ok=True,
+                                   latency_ms=latency_ms)
                         meta.update({"provider_used": "groq",
-                                     "latency_ms": int((time.perf_counter() - t0) * 1000)})
+                                     "latency_ms": latency_ms})
                         return parsed, meta
                     except Exception as exc:  # noqa: BLE001
                         last_err = f"groq: {exc}"
+                        record_llm("groq", "extract", ok=False)
                         log.warning(f"LLM extractor — Groq failed: {exc}")
                         continue
                 if provider == "gemini" and self.has_gemini:
@@ -138,11 +143,15 @@ class LLMExtractor:
                         t0 = time.perf_counter()
                         raw = await self._call_gemini(client, user_msg)
                         parsed = self._parse_to_schema(raw)
+                        latency_ms = int((time.perf_counter() - t0) * 1000)
+                        record_llm("gemini", "extract", ok=True,
+                                   latency_ms=latency_ms)
                         meta.update({"provider_used": "gemini",
-                                     "latency_ms": int((time.perf_counter() - t0) * 1000)})
+                                     "latency_ms": latency_ms})
                         return parsed, meta
                     except Exception as exc:  # noqa: BLE001
                         last_err = f"gemini: {exc}"
+                        record_llm("gemini", "extract", ok=False)
                         log.warning(f"LLM extractor — Gemini failed: {exc}")
                         continue
 

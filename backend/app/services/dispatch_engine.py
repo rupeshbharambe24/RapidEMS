@@ -30,6 +30,8 @@ from ..models.hospital_alert import AlertStatus, HospitalAlert
 from ..schemas.dispatch import DispatchPlan
 from ..sockets.sio import emit_hospital_alert, emit_hospital_alert_status
 from .ai_service import get_ai_service
+from ..observability.metrics import (record_dispatch_outcome,
+                                     time_dispatch)
 from .er_briefing import generate_briefing
 from .geo_service import estimate_zone_id, haversine_km
 from .ml_extras import (dispatch_match_multiplier, hospital_wait_estimate,
@@ -79,6 +81,24 @@ async def dispatch_emergency(
     (Phase 1.2) so the Hungarian assignment is honoured even when a different
     ambulance would have been the greedy local pick.
     """
+    with time_dispatch():
+        try:
+            return await _dispatch_emergency_inner(
+                db, emergency, user_id, forced_ambulance=forced_ambulance)
+        except DispatchError:
+            # Severity may already be persisted on the emergency row even
+            # when the candidate filter / hospital scoring fails.
+            sev = int(emergency.predicted_severity or 0)
+            record_dispatch_outcome(sev, ok=False)
+            raise
+
+
+async def _dispatch_emergency_inner(
+    db: AsyncSession, emergency: Emergency,
+    user_id: Optional[int] = None,
+    *,
+    forced_ambulance: Optional[Ambulance] = None,
+) -> DispatchPlan:
     ai = get_ai_service()
     now = datetime.utcnow()
     used_fallback = False
@@ -395,6 +415,8 @@ async def dispatch_emergency(
     # Background ER briefing (Gemini ~3-5s; falls back to template). Runs in
     # its own AsyncSession so the request can return immediately.
     asyncio.create_task(_briefing_background(dispatch.id, alert.id, best_hosp.id))
+
+    record_dispatch_outcome(severity_level, ok=True)
 
     return DispatchPlan(
         dispatch_id=dispatch.id,
