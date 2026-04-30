@@ -834,7 +834,7 @@ function FamilyTrackingCard() {
           <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 mb-1">
             Share this link — visible only now
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-2">
             <code className="flex-1 truncate text-xs font-mono text-emerald-100">
               {urlFor(latestToken)}
             </code>
@@ -846,6 +846,24 @@ function FamilyTrackingCard() {
                     className="btn-ghost text-xs">
               <X className="w-3.5 h-3.5"/>
             </button>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <a href={`https://wa.me/?text=${encodeURIComponent(
+                'Live ambulance tracking — ' + urlFor(latestToken))}`}
+               target="_blank" rel="noreferrer"
+               className="btn-ghost flex-1 !py-1.5 text-emerald-300 border-emerald-400/40">
+              <MessageCircle className="w-3.5 h-3.5"/>WhatsApp
+            </a>
+            <a href={`https://t.me/share/url?url=${encodeURIComponent(urlFor(latestToken))}&text=${encodeURIComponent('Live ambulance tracking')}`}
+               target="_blank" rel="noreferrer"
+               className="btn-ghost flex-1 !py-1.5 text-cyan-300 border-cyan-400/40">
+              <Send className="w-3.5 h-3.5"/>Telegram
+            </a>
+            <a href={`sms:?body=${encodeURIComponent(
+                'Live ambulance tracking — ' + urlFor(latestToken))}`}
+               className="btn-ghost flex-1 !py-1.5">
+              <Phone className="w-3.5 h-3.5"/>SMS
+            </a>
           </div>
         </div>
       )}

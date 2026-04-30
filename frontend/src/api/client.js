@@ -116,8 +116,11 @@ export const publicApi = {
 
 // ─────────── Family tracking ───────────
 // Note: backend mounts under /track-api so the SPA route /track/:token is free.
+// publicSnapshot + postNote are no-auth: send via the bare _publicAxios so
+// the JWT interceptor doesn't fire when a guest opens the link.
 export const trackingApi = {
-  publicSnapshot: (token)        => api.get(`/track-api/${encodeURIComponent(token)}`).then(r => r.data),
+  publicSnapshot: (token)        => _publicAxios.get(`/track-api/${encodeURIComponent(token)}`).then(r => r.data),
+  postNote:       (token, payload) => _publicAxios.post(`/track-api/${encodeURIComponent(token)}/notes`, payload).then(r => r.data),
   createLink:     (payload)      => api.post('/track-api/links', payload).then(r => r.data),
   listMine:       ()             => api.get('/track-api/links').then(r => r.data),
   revoke:         (id)           => api.post(`/track-api/links/${id}/revoke`).then(r => r.data),

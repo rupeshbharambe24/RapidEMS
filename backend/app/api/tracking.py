@@ -21,6 +21,7 @@ from ..models.ambulance import Ambulance
 from ..models.dispatch import Dispatch
 from ..models.emergency import Emergency
 from ..models.family_link import FamilyLink
+from ..models.family_link_note import FamilyLinkNote, NoteSenderRole
 from ..models.hospital import Hospital
 from ..models.patient_profile import PatientProfile
 from ..models.user import User
@@ -65,6 +66,13 @@ class FamilyLinkOut(BaseModel):
     created_at: datetime
 
 
+class TrackNote(BaseModel):
+    sender_role: str
+    sender_name: Optional[str] = None
+    message: str
+    created_at: datetime
+
+
 class TrackSnapshot(BaseModel):
     """Public NoK view. Strictly read-only and minimal PHI."""
     emergency_id: int
@@ -83,10 +91,18 @@ class TrackSnapshot(BaseModel):
     hospital_name: Optional[str] = None
     hospital_lat: Optional[float] = None
     hospital_lng: Optional[float] = None
+    hospital_address: Optional[str] = None
+    hospital_emergency_phone: Optional[str] = None
 
     dispatch_status: Optional[str] = None
     eta_minutes: Optional[float] = None
     expires_at: datetime
+    notes: List[TrackNote] = []
+
+
+class NokNoteIn(BaseModel):
+    message: str = Field(..., min_length=1, max_length=400)
+    sender_name: Optional[str] = Field(default=None, max_length=120)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -214,6 +230,14 @@ async def public_snapshot(token: str, db: AsyncSession = Depends(get_db)):
     if dispatch and dispatch.predicted_eta_seconds:
         eta_minutes = round(dispatch.predicted_eta_seconds / 60.0, 1)
 
+    # Last 20 notes, oldest-first so the SPA can render in chat order.
+    note_rows = list((await db.scalars(
+        select(FamilyLinkNote)
+        .where(FamilyLinkNote.family_link_id == link.id)
+        .order_by(FamilyLinkNote.created_at.asc())
+        .limit(20)
+    )).all())
+
     return TrackSnapshot(
         emergency_id=link.emergency_id,
         patient_first_name=first_name,
@@ -228,7 +252,54 @@ async def public_snapshot(token: str, db: AsyncSession = Depends(get_db)):
         hospital_name=hosp.name if hosp else None,
         hospital_lat=hosp.lat if hosp else None,
         hospital_lng=hosp.lng if hosp else None,
+        hospital_address=hosp.address if hosp else None,
+        hospital_emergency_phone=hosp.emergency_phone if hosp else None,
         dispatch_status=dispatch.status if dispatch else None,
         eta_minutes=eta_minutes,
         expires_at=link.expires_at,
+        notes=[TrackNote(
+            sender_role=n.sender_role, sender_name=n.sender_name,
+            message=n.message, created_at=n.created_at,
+        ) for n in note_rows],
+    )
+
+
+# ── Public: NoK posts a note ──────────────────────────────────────────────
+@router.post("/{token}/notes", response_model=TrackNote, status_code=201)
+async def post_note(
+    token: str, payload: NokNoteIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public, token-only. Lets the next-of-kin leave a short presence
+    update visible to the patient + dispatcher. Notes are length-capped
+    and rate-limited to 10 per link in any 5-minute window."""
+    try:
+        link = await verify_token(db, token)
+    except ValueError as exc:
+        raise HTTPException(410, detail=str(exc))
+
+    # Anti-flood: count notes from the last 5 min on this link.
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(minutes=5)
+    recent = (await db.scalars(
+        select(FamilyLinkNote)
+        .where(FamilyLinkNote.family_link_id == link.id,
+               FamilyLinkNote.created_at >= cutoff)
+    )).all()
+    if len(list(recent)) >= 10:
+        raise HTTPException(429,
+            detail="Too many notes — please slow down (10 per 5 min).")
+
+    note = FamilyLinkNote(
+        family_link_id=link.id,
+        sender_role=NoteSenderRole.NOK.value,
+        sender_name=payload.sender_name or link.nok_name,
+        message=payload.message.strip(),
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return TrackNote(
+        sender_role=note.sender_role, sender_name=note.sender_name,
+        message=note.message, created_at=note.created_at,
     )

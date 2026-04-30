@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # on Base.metadata so autogenerate sees them.
 from app.database import DATABASE_URL, Base  # noqa: E402
 from app.models import (  # noqa: E402,F401
-    ambulance, audit_log, dispatch, emergency, family_link, hospital,
-    hospital_alert, medical_record, notification_subscription,
+    ambulance, audit_log, dispatch, emergency, family_link, family_link_note,
+    hospital, hospital_alert, medical_record, notification_subscription,
     patient_profile, patient_telemetry, traffic_snapshot, user,
 )
 
