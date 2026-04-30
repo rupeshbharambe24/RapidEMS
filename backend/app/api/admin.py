@@ -18,6 +18,10 @@ from ..database import get_db
 from ..services.audit_chain import verify_chain
 from ..services.data_retention import (patient_erasure, patient_export_bundle,
                                        run_retention_sweep)
+from ..services.demo_runner import (list_captures, list_scenarios,
+                                    replay_status, runner_status,
+                                    start_replay, start_scenario,
+                                    stop_scenario)
 from ..models.ambulance import Ambulance, AmbulanceStatus
 from ..models.audit_log import AuditLog
 from ..models.dispatch import Dispatch
@@ -474,3 +478,90 @@ async def assign_paramedic(
 
     amb.assigned_user_id = payload.user_id
     await db.commit()
+
+
+# ── Cinematic demo + replay (Phase 3.1) ───────────────────────────────────
+class DemoStartIn(BaseModel):
+    scenario: str = Field(..., description="One of /admin/demo/scenarios.")
+    speed: float = Field(default=1.0, ge=0.1, le=20.0,
+        description="1.0 = scripted timing; >1 compresses, <1 stretches.")
+
+
+class DemoStatusOut(BaseModel):
+    running: bool
+    state: Optional[dict] = None
+
+
+class DemoScenarioOut(BaseModel):
+    name: str
+    beats: int
+
+
+class ReplayStartIn(BaseModel):
+    session_id: str
+    speed: float = Field(default=1.0, ge=0.1, le=20.0)
+
+
+class ReplayCaptureOut(BaseModel):
+    session_id: str
+    frames: int
+    size_bytes: int
+
+
+@router.get("/demo/scenarios", response_model=List[DemoScenarioOut])
+async def demo_scenarios(_: User = Depends(require_role("admin"))):
+    """Built-in scripted scenarios. Hand a name to /admin/demo/start."""
+    return [DemoScenarioOut(**s) for s in list_scenarios()]
+
+
+@router.post("/demo/start", response_model=DemoStatusOut, status_code=201)
+async def demo_start(payload: DemoStartIn,
+                     _: User = Depends(require_role("admin"))):
+    """Run a scripted scenario. Refuses if one is already running."""
+    try:
+        state = await start_scenario(payload.scenario, payload.speed)
+    except ValueError as exc:
+        raise HTTPException(404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc))
+    return DemoStatusOut(running=True, state=runner_status())
+
+
+@router.get("/demo/status", response_model=DemoStatusOut)
+async def demo_status(_: User = Depends(require_role("admin"))):
+    state = runner_status()
+    return DemoStatusOut(running=bool(state and not state.get("finished")),
+                         state=state)
+
+
+@router.post("/demo/stop", response_model=DemoStatusOut)
+async def demo_stop(_: User = Depends(require_role("admin"))):
+    cancelled = await stop_scenario()
+    return DemoStatusOut(running=False, state={"cancelled": cancelled,
+                                               "previous": runner_status()})
+
+
+@router.get("/replay", response_model=List[ReplayCaptureOut])
+async def replay_list(_: User = Depends(require_role("admin"))):
+    """All captured demo runs available for replay."""
+    return [ReplayCaptureOut(**c) for c in list_captures()]
+
+
+@router.post("/replay/start", response_model=DemoStatusOut, status_code=201)
+async def replay_start(payload: ReplayStartIn,
+                       _: User = Depends(require_role("admin"))):
+    """Re-emit a captured event log without touching the database."""
+    try:
+        await start_replay(payload.session_id, payload.speed)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc))
+    return DemoStatusOut(running=True, state=replay_status())
+
+
+@router.get("/replay/status", response_model=DemoStatusOut)
+async def replay_status_route(_: User = Depends(require_role("admin"))):
+    state = replay_status()
+    return DemoStatusOut(running=bool(state and not state.get("finished")),
+                         state=state)
