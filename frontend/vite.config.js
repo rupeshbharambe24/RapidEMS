@@ -28,6 +28,7 @@ export default defineConfig({
       '/public-api':    { target: 'http://localhost:8000', changeOrigin: true },
       '/telemetry':     { target: 'http://localhost:8000', changeOrigin: true },
       '/mci':           { target: 'http://localhost:8000', changeOrigin: true },
+      '/drones':        { target: 'http://localhost:8000', changeOrigin: true },
       '/socket.io':     { target: 'http://localhost:8000', changeOrigin: true, ws: true },
     },
   },
