@@ -9,6 +9,7 @@ import { AmbStatusPill, EmergencyStatusPill, SeverityPill } from '../components/
 
 import { analyticsApi, emergenciesApi, dispatchesApi } from '../api/client.js'
 import { useAmbulancesStore } from '../store/ambulances.js'
+import { useDronesStore } from '../store/drones.js'
 import { useEmergenciesStore } from '../store/emergencies.js'
 import { useHospitalsStore } from '../store/hospitals.js'
 import { useDispatchesStore } from '../store/dispatches.js'
@@ -24,6 +25,7 @@ export default function Dashboard() {
   const fetchHosps  = useHospitalsStore(s => s.fetch)
   const active      = useDispatchesStore(s => s.active)
   const fetchActive = useDispatchesStore(s => s.fetchActive)
+  const fetchDrones = useDronesStore(s => s.fetch)
   const toast       = useUiStore(s => s.toast)
 
   const [kpis, setKpis] = useState(null)
@@ -48,6 +50,7 @@ export default function Dashboard() {
   // Initial load
   useEffect(() => {
     fetchAmbs(); fetchHosps(); fetchEmers({ limit: 50 }); fetchActive()
+    fetchDrones()
     refreshKpis()
   }, [])
 

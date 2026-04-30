@@ -42,6 +42,35 @@ export function hospitalIcon(beds = 0) {
   })
 }
 
+// ── Drone icon (Phase 3.6) ────────────────────────────
+const DRONE_STATUS_COLORS = {
+  available: '#475569',   // depot, dim
+  en_route:  '#06b6d4',   // cyan, flying out
+  on_scene:  '#a855f7',   // purple, observing
+  returning: '#0891b2',   // muted cyan, heading home
+}
+
+export function droneIcon(status = 'available') {
+  const color = DRONE_STATUS_COLORS[status] || '#94a3b8'
+  const pulse = status === 'en_route' || status === 'on_scene'
+  return L.divIcon({
+    className: '',
+    iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -14],
+    html: `
+      <div style="position:relative">
+        ${pulse ? `<div class="drone-pulse" style="background:${color}55"></div>` : ''}
+        <div class="drone-marker" style="background:${color}; border:2px solid #0a0e1a">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
+            <circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>
+            <path d="M8 6h8M8 18h8M6 8v8M18 8v8"/>
+            <rect x="10" y="10" width="4" height="4" rx="0.5"/>
+          </svg>
+        </div>
+      </div>`,
+  })
+}
+
 // ── Emergency icon (pulsing) ──────────────────────────
 export function emergencyIcon(severity = 3) {
   const color = SEVERITY_COLORS[severity] || '#94a3b8'
