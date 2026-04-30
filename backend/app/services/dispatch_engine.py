@@ -13,6 +13,7 @@ Given an Emergency, this:
 This is the only place where the 5 ML models meaningfully come together.
 """
 import asyncio
+import json
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -358,6 +359,10 @@ async def _dispatch_emergency_inner(
         distance_meters=float(best_distance_km * 1000),
         hospital_recommendation_score=float(best_score),
         status=DispatchStatus.EN_ROUTE.value,
+        # Persist the route polyline so the AR overlay (Phase 3.5) and
+        # post-incident replay can read it back without re-routing.
+        route_polyline=(json.dumps(best_route.polyline)
+                        if best_route and best_route.polyline else None),
     )
     db.add(dispatch)
 

@@ -30,6 +30,7 @@ export default defineConfig({
       '/mci':           { target: 'http://localhost:8000', changeOrigin: true },
       '/drones':        { target: 'http://localhost:8000', changeOrigin: true },
       '/insurance':     { target: 'http://localhost:8000', changeOrigin: true },
+      '/ar':            { target: 'http://localhost:8000', changeOrigin: true },
       '/socket.io':     { target: 'http://localhost:8000', changeOrigin: true, ws: true },
     },
   },
