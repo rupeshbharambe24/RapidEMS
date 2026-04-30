@@ -157,6 +157,13 @@ export const copilotApi = {
     api.post('/copilot/ask', { query, context }).then(r => r.data),
 }
 
+// ─────────── Wearable telemetry ───────────
+export const telemetryApi = {
+  ingest: (readings)         => api.post('/telemetry/batch', { readings }).then(r => r.data),
+  list:   (params)           => api.get('/telemetry/me', { params }).then(r => r.data),
+  latest: ()                 => api.get('/telemetry/me/latest').then(r => r.data),
+}
+
 // ─────────── Notifications ───────────
 export const notificationsApi = {
   capabilities: ()           => api.get('/notifications/capabilities').then(r => r.data),

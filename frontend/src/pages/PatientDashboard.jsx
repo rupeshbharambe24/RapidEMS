@@ -4,10 +4,10 @@ import {
   AlertCircle, Heart, FileText, Upload, Trash2, MapPin, Phone,
   ShieldAlert, Loader2, LogOut, Activity, Clock, CheckCircle2,
   Bell, Send, Mail, MessageCircle, ExternalLink, Plus, X,
-  Share2, Copy, ShieldOff, Users,
+  Share2, Copy, ShieldOff, Users, Watch, Droplet, Wind, Thermometer,
 } from 'lucide-react'
 
-import { patientApi, notificationsApi, trackingApi } from '../api/client.js'
+import { patientApi, notificationsApi, trackingApi, telemetryApi } from '../api/client.js'
 import { useAuthStore } from '../store/auth.js'
 import { useUiStore } from '../store/ui.js'
 
@@ -323,6 +323,9 @@ export default function PatientDashboard() {
           )}
         </section>
 
+        {/* Wearable telemetry */}
+        <WearableCard/>
+
         {/* Notifications */}
         <NotificationsCard/>
 
@@ -391,6 +394,174 @@ export default function PatientDashboard() {
     </div>
   )
 }
+
+// ── Wearable card ──────────────────────────────────────────────────────────
+function WearableCard() {
+  const toast = useUiStore(s => s.toast)
+  const [latest, setLatest] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState({
+    source: 'manual',
+    heart_rate: '', spo2: '',
+    blood_pressure_systolic: '', blood_pressure_diastolic: '',
+    respiratory_rate: '', body_temperature_c: '', glucose_mg_dl: '',
+  })
+  const [showAdd, setShowAdd] = useState(false)
+
+  async function refresh() {
+    try { setLatest(await telemetryApi.latest()) }
+    catch (err) {
+      if (err?.response?.status === 409) setLatest(null) // no profile yet
+      else toast(err?.response?.data?.detail || 'Telemetry load failed', 'critical')
+    }
+  }
+  useEffect(() => { refresh() }, [])
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const reading = { source: draft.source }
+      const numKeys = ['heart_rate','spo2','blood_pressure_systolic',
+                       'blood_pressure_diastolic','respiratory_rate',
+                       'body_temperature_c','glucose_mg_dl']
+      for (const k of numKeys) {
+        if (draft[k] !== '') reading[k] = parseFloat(draft[k])
+      }
+      if (Object.keys(reading).length <= 1) {
+        toast('Enter at least one reading.', 'critical'); setBusy(false); return
+      }
+      const r = await telemetryApi.ingest([reading])
+      toast(`${r.inserted} reading saved`, 'success')
+      setDraft({ source:'manual', heart_rate:'', spo2:'',
+                 blood_pressure_systolic:'', blood_pressure_diastolic:'',
+                 respiratory_rate:'', body_temperature_c:'', glucose_mg_dl:'' })
+      setShowAdd(false)
+      refresh()
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Save failed', 'critical')
+    } finally { setBusy(false) }
+  }
+
+  const Tile = ({ icon: Icon, label, value, unit, at, tint }) => (
+    <div className={`card p-3 border ${tint || 'border-line/40'}`}>
+      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-500">
+        <Icon className="w-3 h-3"/>{label}
+      </div>
+      <div className="text-2xl font-bold mt-0.5 leading-none">
+        {value ?? '—'}<span className="text-xs text-slate-400 ml-1">{value != null && unit}</span>
+      </div>
+      <div className="text-[10px] text-slate-500 mt-1">
+        {at ? new Date(at).toLocaleString() : 'no readings yet'}
+      </div>
+    </div>
+  )
+
+  const hr = latest?.heart_rate
+  const spo2 = latest?.spo2
+  const tempC = latest?.body_temperature_c
+  const glucose = latest?.glucose_mg_dl
+
+  return (
+    <section className="card p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <Watch className="w-5 h-5 text-cyan-300"/>
+          <h2 className="text-xl font-bold">Wearable readings</h2>
+        </div>
+        <button onClick={() => setShowAdd(true)} className="btn-ghost text-xs">
+          <Plus className="w-3.5 h-3.5"/>add reading
+        </button>
+      </div>
+
+      <div className="text-xs text-slate-500 mb-4">
+        Latest values from your watch / BP cuff / glucometer. When you raise an
+        SOS, these are auto-injected into the dispatcher's view so the AI sees
+        real numbers, not guesses.
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Tile icon={Heart}      label="Heart rate" value={hr}    unit="bpm"
+              at={latest?.heart_rate_at}
+              tint={hr != null && (hr < 50 || hr > 110) ? 'border-amber-400/40' : ''}/>
+        <Tile icon={Wind}       label="SpO₂"        value={spo2}  unit="%"
+              at={latest?.spo2_at}
+              tint={spo2 != null && spo2 < 92 ? 'border-sig-critical/40' :
+                    spo2 != null && spo2 < 95 ? 'border-amber-400/40' : ''}/>
+        <Tile icon={Activity}   label="Blood pressure"
+              value={latest?.blood_pressure_systolic
+                       ? `${latest.blood_pressure_systolic}/${latest.blood_pressure_diastolic}`
+                       : null}
+              unit="mmHg" at={latest?.blood_pressure_at}/>
+        <Tile icon={Thermometer} label="Temp" value={tempC} unit="°C"
+              at={latest?.body_temperature_at}
+              tint={tempC != null && tempC >= 38 ? 'border-amber-400/40' : ''}/>
+        <Tile icon={Droplet}    label="Glucose" value={glucose} unit="mg/dL"
+              at={latest?.glucose_at}
+              tint={glucose != null && (glucose < 70 || glucose > 200) ? 'border-amber-400/40' : ''}/>
+        <Tile icon={Wind}       label="Resp rate" value={latest?.respiratory_rate}
+              unit="/min" at={latest?.respiratory_rate_at}/>
+        <Tile icon={Activity}   label="Steps today" value={latest?.steps_since_midnight}
+              unit="" at={null}/>
+        {latest?.fall_detected_at && (
+          <Tile icon={AlertCircle} label="Fall detected" value="yes" unit=""
+                at={latest.fall_detected_at} tint="border-sig-critical/50"/>
+        )}
+      </div>
+
+      {showAdd && (
+        <form onSubmit={save} className="card p-4 mt-4 space-y-3 border-cyan-400/30">
+          <div className="text-sm font-semibold mb-1">Manual reading</div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Heart rate (bpm)">
+              <input type="number" min="20" max="250" className="field font-mono"
+                     value={draft.heart_rate}
+                     onChange={e => setDraft({...draft, heart_rate: e.target.value})}/>
+            </Field>
+            <Field label="SpO₂ (%)">
+              <input type="number" step="0.1" min="40" max="100" className="field font-mono"
+                     value={draft.spo2}
+                     onChange={e => setDraft({...draft, spo2: e.target.value})}/>
+            </Field>
+            <Field label="BP systolic">
+              <input type="number" min="40" max="260" className="field font-mono"
+                     value={draft.blood_pressure_systolic}
+                     onChange={e => setDraft({...draft, blood_pressure_systolic: e.target.value})}/>
+            </Field>
+            <Field label="BP diastolic">
+              <input type="number" min="20" max="180" className="field font-mono"
+                     value={draft.blood_pressure_diastolic}
+                     onChange={e => setDraft({...draft, blood_pressure_diastolic: e.target.value})}/>
+            </Field>
+            <Field label="Resp rate (/min)">
+              <input type="number" min="4" max="60" className="field font-mono"
+                     value={draft.respiratory_rate}
+                     onChange={e => setDraft({...draft, respiratory_rate: e.target.value})}/>
+            </Field>
+            <Field label="Temp (°C)">
+              <input type="number" step="0.1" min="25" max="45" className="field font-mono"
+                     value={draft.body_temperature_c}
+                     onChange={e => setDraft({...draft, body_temperature_c: e.target.value})}/>
+            </Field>
+            <Field label="Glucose (mg/dL)" wide>
+              <input type="number" min="20" max="900" className="field font-mono"
+                     value={draft.glucose_mg_dl}
+                     onChange={e => setDraft({...draft, glucose_mg_dl: e.target.value})}/>
+            </Field>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-line/30">
+            <button type="submit" disabled={busy} className="btn-danger flex-1">
+              {busy ? 'Saving…' : 'Save reading'}
+            </button>
+            <button type="button" onClick={() => setShowAdd(false)}
+                    className="btn-ghost px-4">Cancel</button>
+          </div>
+        </form>
+      )}
+    </section>
+  )
+}
+
 
 // ── Notifications card ─────────────────────────────────────────────────────
 function NotificationsCard() {

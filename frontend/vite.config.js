@@ -26,6 +26,7 @@ export default defineConfig({
       '/track-api':     { target: 'http://localhost:8000', changeOrigin: true },
       '/copilot':       { target: 'http://localhost:8000', changeOrigin: true },
       '/public-api':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/telemetry':     { target: 'http://localhost:8000', changeOrigin: true },
       '/socket.io':     { target: 'http://localhost:8000', changeOrigin: true, ws: true },
     },
   },
