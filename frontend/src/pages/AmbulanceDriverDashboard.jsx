@@ -7,11 +7,11 @@ import {
   Truck, Phone, MapPin, ChevronRight, AlertCircle, Loader2, LogOut,
   Heart, Hospital as HospitalIcon, Activity, CheckCircle2, RotateCcw,
   AlertTriangle, FileWarning, WifiOff, CloudOff, ShieldCheck, ShieldX,
-  ChevronDown,
+  ChevronDown, Navigation,
 } from 'lucide-react'
 import L from 'leaflet'
 
-import { driverApi, ambulancesApi, insuranceApi } from '../api/client.js'
+import { driverApi, ambulancesApi, insuranceApi, arApi } from '../api/client.js'
 import api from '../api/client.js'
 import { enqueue, flush, onFlush, pending } from '../utils/offline_queue.js'
 import { useAuthStore } from '../store/auth.js'
@@ -50,6 +50,56 @@ const hospIcon = L.divIcon({
   html: '<div style="width:22px;height:22px;border-radius:6px;background:#10b981;border:3px solid #0a0e1a;box-shadow:0 0 12px #10b981"></div>',
 })
 
+// ── AR waypoint icons (Phase 3.5) ────────────────────────────────────────
+// Each waypoint becomes a numbered floating card anchored at its lat/lng.
+// The badge colour reflects the anchor type so the eye picks out junctions
+// at a glance: amber for the origin, cyan for plain straight-line waypoints,
+// purple for intersections (real turns), emerald for the destination.
+const AR_ANCHOR_COLOR = {
+  origin:        '#f59e0b',
+  waypoint:      '#06b6d4',
+  intersection:  '#a855f7',
+  destination:   '#10b981',
+}
+const AR_TURN_GLYPH = {
+  depart:      '↑',
+  straight:    '↑',
+  left:        '↰',
+  sharp_left:  '↺',
+  right:       '↱',
+  sharp_right: '↻',
+  arrive:      '⚑',
+}
+
+function arWaypointIcon(wp) {
+  const color = AR_ANCHOR_COLOR[wp.anchor] || '#06b6d4'
+  const glyph = AR_TURN_GLYPH[wp.turn_cue] || '↑'
+  // Bearing is rotation in degrees from north; subtracting 90 here means
+  // the glyph points right when bearing is 90 (east), matching the
+  // "where am I going next" intuition for a head-up arrow.
+  const rot = (wp.bearing_deg ?? 0).toFixed(1)
+  const dist = wp.distance_to_next_m
+  const distLabel = dist > 0
+    ? (dist >= 1000
+      ? `${(dist / 1000).toFixed(1)} km`
+      : `${dist} m`)
+    : ''
+  return L.divIcon({
+    className: '',
+    iconSize: [44, 44], iconAnchor: [22, 22], popupAnchor: [0, -18],
+    html: `
+      <div class="ar-waypoint" style="border-color:${color}">
+        <div class="ar-waypoint-arrow" style="color:${color}; transform: rotate(${rot}deg)">
+          ${glyph}
+        </div>
+        <div class="ar-waypoint-index" style="background:${color}">${wp.index + 1}</div>
+        ${distLabel
+          ? `<div class="ar-waypoint-dist">${distLabel}</div>`
+          : ''}
+      </div>`,
+  })
+}
+
 function FlyTo({ to }) {
   const map = useMap()
   useEffect(() => { if (to) map.flyTo(to, 14, { duration: 0.6 }) }, [to])
@@ -73,6 +123,11 @@ export default function AmbulanceDriverDashboard() {
   // Reset whenever the dispatch_id changes so a new patient doesn't
   // inherit the previous patient's coverage.
   const [insurance, setInsurance] = useState(null)
+  // Phase 3.5 — AR turn-by-turn overlay. Off by default; loads waypoints
+  // from /ar/turn-by-turn the first time it's toggled on per dispatch.
+  const [arOn, setArOn] = useState(false)
+  const [arOverlay, setArOverlay] = useState(null)
+  const [arBusy, setArBusy] = useState(false)
   const watchIdRef = useRef(null)
 
   // ── Initial load + claim picker if no ambulance yet ─────────────────────
@@ -167,10 +222,31 @@ export default function AmbulanceDriverDashboard() {
     } finally { setBusy(false) }
   }
 
-  // Reset insurance state when the dispatch changes — new patient on board.
+  // Reset insurance + AR state when the dispatch changes — new patient on
+  // board, new route to compute.
   useEffect(() => {
     setInsurance(null)
+    setArOverlay(null)
+    setArOn(false)
   }, [me?.active_dispatch?.id])
+
+  // Lazy-load the AR overlay the first time the toggle flips on for a
+  // given dispatch. Subsequent toggles just hide / show the existing data
+  // so we don't burn a request on every flip.
+  useEffect(() => {
+    if (!arOn || arOverlay || !me?.active_dispatch?.id) return
+    let cancelled = false
+    setArBusy(true)
+    arApi.turnByTurn(me.active_dispatch.id)
+      .then(r => { if (!cancelled) setArOverlay(r) })
+      .catch(err => {
+        if (cancelled) return
+        toast(err?.response?.data?.detail || 'AR overlay unavailable', 'critical')
+        setArOn(false)
+      })
+      .finally(() => { if (!cancelled) setArBusy(false) })
+    return () => { cancelled = true }
+  }, [arOn, arOverlay, me?.active_dispatch?.id])
 
   async function advance() {
     if (!me?.active_dispatch) return
@@ -298,7 +374,50 @@ export default function AmbulanceDriverDashboard() {
               pathOptions={{ color: '#10b981', weight: 4, opacity: 0.85 }}
             />
           )}
+
+          {/* AR turn-by-turn waypoints (Phase 3.5) */}
+          {arOn && arOverlay?.waypoints?.map(wp => (
+            <Marker key={`ar${wp.index}`}
+                    position={[wp.lat, wp.lng]}
+                    icon={arWaypointIcon(wp)}/>
+          ))}
         </MapContainer>
+
+        {/* AR toggle (visible whenever a dispatch is active) */}
+        {d && (
+          <button
+            type="button"
+            onClick={() => setArOn(o => !o)}
+            disabled={arBusy}
+            title="Toggle AR turn-by-turn overlay"
+            className={`absolute top-3 right-3 z-[450] flex items-center gap-1.5
+                       px-2.5 py-1.5 rounded border backdrop-blur-md text-xs font-mono
+                       uppercase tracking-wider transition-all
+                       ${arOn
+                         ? 'bg-cyan-400/15 border-cyan-300 text-cyan-100 shadow-[0_0_16px_rgba(6,182,212,0.4)]'
+                         : 'bg-ink-900/70 border-line/60 text-slate-300 hover:border-cyan-400/50'}
+                       disabled:opacity-50`}>
+            {arBusy
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin"/>
+              : <Navigation className="w-3.5 h-3.5"/>}
+            AR
+            {arOn && arOverlay?.waypoints?.length > 0 && (
+              <span className="text-[10px] text-cyan-300/80">
+                · {arOverlay.waypoints.length}
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Cumulative-distance hint when AR is on */}
+        {arOn && arOverlay?.has_polyline === false && (
+          <div className="absolute top-14 right-3 z-[450] max-w-[260px] px-2.5 py-1.5 rounded
+                          border border-amber-400/40 bg-amber-500/10 backdrop-blur-md
+                          text-[11px] text-amber-100">
+            Routing fell back to haversine — only origin/destination markers
+            available. Wire ORS / Mapbox / HERE for full turn cues.
+          </div>
+        )}
 
         {/* ── Floating dispatch card ─────────────────────────────────── */}
         {d ? (
