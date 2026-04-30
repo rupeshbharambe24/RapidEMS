@@ -58,6 +58,8 @@ def _make_hospitals(city_lat: float, city_lng: float, n: int) -> list[Hospital]:
             er_wait_minutes=rng.randint(5, 75),
             is_diversion=False,
             quality_rating=rng.randint(3, 5),
+            # ~40% of facilities have a helipad — typical urban mix.
+            has_helipad=rng.random() < 0.40,
         )
         hospitals.append(h)
     return hospitals

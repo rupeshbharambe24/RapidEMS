@@ -40,4 +40,8 @@ class Hospital(Base):
     is_active = Column(Boolean, default=True)
     last_updated = Column(DateTime, default=datetime.utcnow)
 
+    # Phase 1.1 — air dispatch tier. Helicopter route eligibility checks
+    # this flag at both ends of the trip.
+    has_helipad = Column(Boolean, default=False)
+
     dispatches = relationship("Dispatch", back_populates="hospital")

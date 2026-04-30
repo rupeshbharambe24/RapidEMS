@@ -226,6 +226,14 @@ async def dispatch_emergency(
     if not candidate_hospitals:
         raise DispatchError("No active hospitals in the system.")
 
+    # Helipad bias: when SEV-1 + ground ETA already long enough that air
+    # would help, give helipad-equipped hospitals a recommender boost so
+    # the pipeline naturally lands on one when reasonable.
+    helipad_bonus_active = (
+        severity_level == 1
+        and (best_eta_seconds / 60.0) > settings.helicopter_min_savings_minutes * 1.5
+    )
+
     best_hosp = None
     best_score = -1.0
     best_hospital_wait: Optional[int] = None
@@ -246,6 +254,12 @@ async def dispatch_emergency(
         # recommender score (so 60-min wait ≈ −0.30 score).
         penalty = min(0.30, wait["predicted_wait_minutes"] * 0.005)
         adj_score = scored["score"] - penalty
+        if helipad_bonus_active and h.has_helipad and d_h <= settings.helicopter_max_range_km:
+            # Bias scales with ground-ETA — the longer the ground trip, the
+            # stronger the pull toward a helipad-equipped facility. 30 min →
+            # +0.60 boost; 60 min → +0.80; capped to keep recommender ≤ ~1.5.
+            ground_min = best_eta_seconds / 60.0
+            adj_score += min(0.80, 0.30 + ground_min * 0.01)
 
         if adj_score > best_score:
             best_score = adj_score
@@ -254,6 +268,43 @@ async def dispatch_emergency(
 
     if best_hosp is None:
         raise DispatchError("Could not score any hospital.")
+
+    # ── Helicopter dispatch eligibility ──────────────────
+    # SEV-1 calls where ground transit is far enough that lift+land
+    # overhead pays for itself, and a helipad-equipped hospital is
+    # within range of both scene and destination.
+    air_proposed = False
+    air_reason: Optional[str] = None
+    air_eta_seconds: Optional[float] = None
+    air_distance_km: Optional[float] = None
+    if severity_level == 1 and best_amb is not None:
+        ground_minutes = best_eta_seconds / 60.0
+        scene_to_hosp_km = haversine_km(
+            emergency.location_lat, emergency.location_lng,
+            best_hosp.lat, best_hosp.lng,
+        )
+        # Air time scene → hospital + lift/land overhead.
+        air_seconds_calc = (
+            settings.helicopter_setup_minutes * 60.0
+            + (scene_to_hosp_km / settings.helicopter_speed_kmh) * 3600.0
+        )
+        air_minutes_calc = air_seconds_calc / 60.0
+        in_range = scene_to_hosp_km <= settings.helicopter_max_range_km
+        helipad_ok = bool(best_hosp.has_helipad)
+        savings_ok = (ground_minutes - air_minutes_calc) >= settings.helicopter_min_savings_minutes
+        if in_range and helipad_ok and savings_ok:
+            air_proposed = True
+            air_reason = (f"SEV-1 with ground ETA {ground_minutes:.1f}m vs "
+                          f"air {air_minutes_calc:.1f}m — savings "
+                          f"{ground_minutes - air_minutes_calc:.1f}m.")
+            air_eta_seconds = air_seconds_calc
+            air_distance_km = scene_to_hosp_km
+        elif severity_level == 1 and not helipad_ok:
+            air_reason = "Air dispatch skipped: best-fit hospital lacks a helipad."
+        elif severity_level == 1 and not savings_ok:
+            air_reason = "Air dispatch skipped: ground ETA already competitive."
+        elif severity_level == 1:
+            air_reason = "Air dispatch skipped: hospital out of helicopter range."
 
     # Outcome predictor — surfaces on the dispatch plan + audit log so the
     # dispatcher can see the model's 30-day survival probability for this case.
@@ -370,4 +421,8 @@ async def dispatch_emergency(
         missing_equipment=best_match_detail["missing_equipment"] if best_match_detail else None,
         skill_bonus=best_match_detail["skill_bonus"] if best_match_detail else None,
         predicted_er_wait_minutes=best_hospital_wait,
+        air_dispatch_proposed=air_proposed,
+        air_dispatch_reason=air_reason,
+        air_eta_minutes=round(air_eta_seconds / 60.0, 1) if air_eta_seconds else None,
+        air_distance_km=round(air_distance_km, 2) if air_distance_km else None,
     )
