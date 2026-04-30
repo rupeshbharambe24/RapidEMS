@@ -2,6 +2,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,8 +12,9 @@ from ..models.user import User
 from ..schemas.dispatch import (DispatchOut, OptimizeProposal,
                                 OptimizeResponse)
 from ..services.multi_dispatch import optimize as multi_optimize
+from ..services.staging import apply_staging, compute_staging
 from ..sockets.sio import emit_emergency_dispatched
-from .deps import get_current_user
+from .deps import get_current_user, require_role
 
 router = APIRouter(prefix="/dispatches", tags=["dispatches"])
 
@@ -48,6 +50,61 @@ async def get_dispatch(did: int, db: AsyncSession = Depends(get_db)):
     if not d:
         raise HTTPException(404, detail="Dispatch not found.")
     return DispatchOut.model_validate(d)
+
+
+class StagingProposal(BaseModel):
+    ambulance_id: int
+    ambulance_registration: str
+    from_lat: Optional[float] = None
+    from_lng: Optional[float] = None
+    target_lat: float
+    target_lng: float
+    zone_id: int
+    predicted_demand: float
+    distance_km: float
+
+
+class StagingResponse(BaseModel):
+    horizon_hours: int
+    proposals: list[StagingProposal]
+    emitted: int = 0
+
+
+@router.get("/staging/preview", response_model=StagingResponse)
+async def staging_preview(
+    horizon_hours: int = Query(2, ge=1, le=12),
+    max_distance_km: float = Query(12.0, ge=1.0, le=50.0),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("dispatcher", "admin")),
+):
+    """Predictive pre-positioning preview. Reads the LSTM hotspot
+    forecaster's next-N-hour window per zone and matches each
+    above-threshold zone to its nearest idle ambulance via greedy
+    nearest-first. Caller decides when to actually emit the advisory.
+    """
+    proposals = await compute_staging(
+        db, horizon_hours=horizon_hours, max_distance_km=max_distance_km)
+    return StagingResponse(horizon_hours=horizon_hours,
+                           proposals=[StagingProposal(**p) for p in proposals])
+
+
+@router.post("/staging/apply", response_model=StagingResponse)
+async def staging_apply(
+    horizon_hours: int = Query(2, ge=1, le=12),
+    max_distance_km: float = Query(12.0, ge=1.0, le=50.0),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("dispatcher", "admin")),
+):
+    """Same as /preview, but emits ``staging:position`` Socket.IO events
+    so each affected driver dashboard can surface the suggested move."""
+    proposals = await compute_staging(
+        db, horizon_hours=horizon_hours, max_distance_km=max_distance_km)
+    sent = await apply_staging(db, proposals)
+    return StagingResponse(
+        horizon_hours=horizon_hours,
+        proposals=[StagingProposal(**p) for p in proposals],
+        emitted=sent,
+    )
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
