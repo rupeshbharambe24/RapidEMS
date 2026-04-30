@@ -6,7 +6,8 @@ Creates:
   - M ambulances at hospital depots
 """
 import random
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .core.logging import log
@@ -57,6 +58,8 @@ def _make_hospitals(city_lat: float, city_lng: float, n: int) -> list[Hospital]:
             er_wait_minutes=rng.randint(5, 75),
             is_diversion=False,
             quality_rating=rng.randint(3, 5),
+            # ~40% of facilities have a helipad — typical urban mix.
+            has_helipad=rng.random() < 0.40,
         )
         hospitals.append(h)
     return hospitals
@@ -103,9 +106,9 @@ def _make_ambulances(hospitals: list[Hospital], n: int) -> list[Ambulance]:
     return ambulances
 
 
-def seed_database(db: Session, force: bool = False):
+async def seed_database(db: AsyncSession, force: bool = False):
     """Idempotent: only seeds when the DB is empty (or force=True)."""
-    has_data = db.query(Hospital).first() is not None
+    has_data = (await db.scalar(select(Hospital))) is not None
     if has_data and not force:
         log.info("Seed: data already present — skipping.")
         return
@@ -113,7 +116,10 @@ def seed_database(db: Session, force: bool = False):
     log.info("Seed: populating database with demo data...")
 
     # 1. Admin user
-    if not db.query(User).filter(User.username == settings.admin_username).first():
+    existing_admin = await db.scalar(
+        select(User).where(User.username == settings.admin_username)
+    )
+    if not existing_admin:
         db.add(User(
             username=settings.admin_username,
             email=settings.admin_email,
@@ -128,12 +134,12 @@ def seed_database(db: Session, force: bool = False):
     hospitals = _make_hospitals(settings.seed_city_lat, settings.seed_city_lng,
                                  settings.seed_num_hospitals)
     db.add_all(hospitals)
-    db.commit()
+    await db.commit()
     log.success(f"Seed: {len(hospitals)} hospitals created")
 
     # 3. Ambulances (need hospitals committed to use them as depots)
-    db.refresh(hospitals[0])
+    await db.refresh(hospitals[0])
     ambulances = _make_ambulances(hospitals, settings.seed_num_ambulances)
     db.add_all(ambulances)
-    db.commit()
+    await db.commit()
     log.success(f"Seed: {len(ambulances)} ambulances created")

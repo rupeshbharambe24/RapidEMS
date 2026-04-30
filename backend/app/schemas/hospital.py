@@ -29,6 +29,7 @@ class HospitalBase(BaseModel):
     er_wait_minutes: int = 0
     is_diversion: bool = False
     quality_rating: int = Field(3, ge=1, le=5)
+    has_helipad: bool = False
 
 
 class HospitalCreate(HospitalBase):

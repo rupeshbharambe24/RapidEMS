@@ -32,10 +32,58 @@ class DispatchPlan(BaseModel):
     predicted_eta_seconds: int
     predicted_eta_minutes: float
     distance_km: float
+    road_distance_km: Optional[float] = None
     hospital_score: float
     severity_level: int
     severity_label: str
     severity_confidence: float
     inferred_patient_type: str
+    routing_provider: Optional[str] = None
+    congestion: Optional[float] = None
+    polyline: Optional[list[list[float]]] = None
     used_fallback: bool = False
     notes: Optional[str] = None
+
+    # Phase 1.6 ─ extra ML signals
+    survival_prob_30d: Optional[float] = None
+    equipment_score: Optional[float] = None
+    missing_equipment: Optional[list[str]] = None
+    skill_bonus: Optional[float] = None
+    predicted_er_wait_minutes: Optional[int] = None
+
+    # Phase 1.1 ─ helicopter dispatch tier
+    air_dispatch_proposed: bool = False
+    air_dispatch_reason: Optional[str] = None
+    air_eta_minutes: Optional[float] = None
+    air_distance_km: Optional[float] = None
+
+
+class RoutePreview(BaseModel):
+    """Response for the GET /routing/preview endpoint."""
+    seconds: float
+    minutes: float
+    meters: float
+    kilometers: float
+    polyline: list[list[float]]
+    congestion: float
+    provider: str
+    used_fallback: bool
+
+
+# ── Multi-emergency optimisation (Phase 1.2) ──────────────────────────────
+class OptimizeProposal(BaseModel):
+    emergency_id: int
+    ambulance_id: int
+    ambulance_registration: str
+    predicted_eta_seconds: int
+    predicted_eta_minutes: float
+    severity_level: int
+    cost: float
+    road_provider: str
+
+
+class OptimizeResponse(BaseModel):
+    preview: bool
+    proposals: list[OptimizeProposal]
+    unassigned_emergency_ids: list[int]
+    dispatched_plans: list[DispatchPlan] = []     # only populated when preview=False

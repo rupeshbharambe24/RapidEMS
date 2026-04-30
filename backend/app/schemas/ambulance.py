@@ -38,3 +38,4 @@ class AmbulanceOut(AmbulanceBase):
     current_lng: Optional[float] = None
     last_gps_update: Optional[datetime] = None
     is_active: bool
+    assigned_user_id: Optional[int] = None

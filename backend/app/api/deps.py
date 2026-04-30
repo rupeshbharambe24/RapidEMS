@@ -1,22 +1,23 @@
-"""Shared FastAPI dependencies — DB session, current user, role guards."""
+"""Shared FastAPI dependencies — DB session, current user, role guards. Async."""
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import decode_token
 from ..database import get_db
 from ..models.user import User
 
 
-def get_current_user(
+async def get_current_user(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """Decode JWT from `Authorization: Bearer <token>` header.
 
-    Returns None if no header is provided — endpoints can decide whether to
-    require a user. For a hackathon demo we keep auth optional on most routes.
+    Returns None if no header is provided — endpoints decide whether to
+    require a user.
     """
     if not authorization:
         return None
@@ -26,8 +27,7 @@ def get_current_user(
     payload = decode_token(parts[1])
     if not payload:
         return None
-    user = db.query(User).filter(User.username == payload.get("sub")).first()
-    return user
+    return await db.scalar(select(User).where(User.username == payload.get("sub")))
 
 
 def require_user(user: Optional[User] = Depends(get_current_user)) -> User:

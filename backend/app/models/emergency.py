@@ -1,7 +1,7 @@
 """Emergency call records."""
 import enum
 from datetime import datetime
-from sqlalchemy import (Boolean, Column, DateTime, Float, Integer, JSON,
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON,
                         String, Text)
 from sqlalchemy.orm import relationship
 
@@ -31,6 +31,10 @@ class Emergency(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Phase 2.8 — multi-tenancy.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True,
+                       index=True)
 
     # Patient identity
     patient_name = Column(String(100))

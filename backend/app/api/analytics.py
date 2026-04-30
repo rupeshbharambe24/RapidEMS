@@ -4,8 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.ambulance import Ambulance, AmbulanceStatus
@@ -39,34 +39,48 @@ class HotspotMap(BaseModel):
 
 
 @router.get("/kpis", response_model=KPIs)
-def get_kpis(db: Session = Depends(get_db)):
+async def get_kpis(db: AsyncSession = Depends(get_db)):
     yesterday = datetime.utcnow() - timedelta(hours=24)
 
-    total_24h = (db.query(func.count(Emergency.id))
-                 .filter(Emergency.created_at >= yesterday).scalar() or 0)
-    pending = (db.query(func.count(Emergency.id))
-               .filter(Emergency.status == "pending").scalar() or 0)
+    total_24h = (await db.scalar(
+        select(func.count(Emergency.id))
+        .where(Emergency.created_at >= yesterday)
+    )) or 0
+    pending = (await db.scalar(
+        select(func.count(Emergency.id))
+        .where(Emergency.status == "pending")
+    )) or 0
 
-    active = (db.query(func.count(Dispatch.id))
-              .filter(Dispatch.status.in_(
-                  ["dispatched","en_route","on_scene","transporting"])).scalar() or 0)
+    active = (await db.scalar(
+        select(func.count(Dispatch.id))
+        .where(Dispatch.status.in_(
+            ["dispatched", "en_route", "on_scene", "transporting"]))
+    )) or 0
 
-    avail = (db.query(func.count(Ambulance.id))
-             .filter(Ambulance.status == AmbulanceStatus.AVAILABLE.value,
-                     Ambulance.is_active == True).scalar() or 0)
-    busy = (db.query(func.count(Ambulance.id))
-            .filter(Ambulance.status != AmbulanceStatus.AVAILABLE.value,
-                    Ambulance.is_active == True).scalar() or 0)
+    avail = (await db.scalar(
+        select(func.count(Ambulance.id))
+        .where(Ambulance.status == AmbulanceStatus.AVAILABLE.value,
+               Ambulance.is_active == True)
+    )) or 0
+    busy = (await db.scalar(
+        select(func.count(Ambulance.id))
+        .where(Ambulance.status != AmbulanceStatus.AVAILABLE.value,
+               Ambulance.is_active == True)
+    )) or 0
 
-    diversions = (db.query(func.count(Hospital.id))
-                  .filter(Hospital.is_diversion == True,
-                          Hospital.is_active == True).scalar() or 0)
+    diversions = (await db.scalar(
+        select(func.count(Hospital.id))
+        .where(Hospital.is_diversion == True, Hospital.is_active == True)
+    )) or 0
 
-    avg_resp = (db.query(func.avg(Dispatch.actual_response_time_seconds))
-                .filter(Dispatch.actual_response_time_seconds.isnot(None))
-                .scalar())
-    avg_sev = (db.query(func.avg(Emergency.predicted_severity))
-               .filter(Emergency.predicted_severity.isnot(None)).scalar())
+    avg_resp = await db.scalar(
+        select(func.avg(Dispatch.actual_response_time_seconds))
+        .where(Dispatch.actual_response_time_seconds.isnot(None))
+    )
+    avg_sev = await db.scalar(
+        select(func.avg(Emergency.predicted_severity))
+        .where(Emergency.predicted_severity.isnot(None))
+    )
 
     return KPIs(
         total_emergencies_24h=int(total_24h),
