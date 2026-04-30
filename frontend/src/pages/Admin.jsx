@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Users, ShieldCheck, ClipboardList, BarChart3, Loader2, Plus, Trash2,
-  Pencil, X, Check, Filter, Zap, AlertTriangle,
+  Pencil, X, Check, Filter, Zap, AlertTriangle, Film, Play, Square,
+  RotateCw,
 } from 'lucide-react'
 
 import { adminApi } from '../api/client.js'
@@ -12,6 +13,7 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'users',    label: 'Users',    icon: Users },
   { id: 'audit',    label: 'Audit',    icon: ClipboardList },
+  { id: 'demo',     label: 'Demo',     icon: Film },
   { id: 'chaos',    label: 'Chaos lab', icon: Zap },
 ]
 
@@ -47,6 +49,7 @@ export default function Admin() {
         {tab === 'overview' && <OverviewTab/>}
         {tab === 'users'    && <UsersTab me={me}/>}
         {tab === 'audit'    && <AuditTab/>}
+        {tab === 'demo'     && <DemoTab/>}
         {tab === 'chaos'    && <ChaosTab/>}
       </div>
     </div>
@@ -571,6 +574,248 @@ function ChaosTab() {
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+
+// ── Demo runner + replay ─────────────────────────────────────────────────
+function DemoTab() {
+  const toast = useUiStore(s => s.toast)
+  const [scenarios, setScenarios] = useState([])
+  const [captures, setCaptures] = useState([])
+  const [demoState, setDemoState] = useState(null)
+  const [replayState, setReplayState] = useState(null)
+  const [picked, setPicked] = useState('cardiac_chain')
+  const [speed, setSpeed] = useState(1.0)
+  const [replaySpeed, setReplaySpeed] = useState(1.0)
+  const [replayPick, setReplayPick] = useState('')
+
+  async function load() {
+    try {
+      const [scn, caps, ds, rs] = await Promise.all([
+        adminApi.demoScenarios(),
+        adminApi.replayList(),
+        adminApi.demoStatus(),
+        adminApi.replayStatus(),
+      ])
+      setScenarios(scn)
+      setCaptures(caps)
+      setDemoState(ds)
+      setReplayState(rs)
+      if (!replayPick && caps.length) setReplayPick(caps[0].session_id)
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Load failed', 'critical')
+    }
+  }
+
+  useEffect(() => {
+    load()
+    const t = setInterval(async () => {
+      try {
+        const [ds, rs] = await Promise.all([
+          adminApi.demoStatus(),
+          adminApi.replayStatus(),
+        ])
+        setDemoState(ds)
+        setReplayState(rs)
+      } catch {}
+    }, 1500)
+    return () => clearInterval(t)
+  }, [])
+
+  async function startDemo() {
+    try {
+      await adminApi.demoStart({ scenario: picked, speed })
+      toast(`Started ${picked}`, 'success')
+      load()
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Start failed', 'critical')
+    }
+  }
+
+  async function stopDemo() {
+    try {
+      await adminApi.demoStop()
+      toast('Stopped', 'success')
+      load()
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Stop failed', 'critical')
+    }
+  }
+
+  async function startReplay() {
+    if (!replayPick) return
+    try {
+      await adminApi.replayStart({ session_id: replayPick, speed: replaySpeed })
+      toast(`Replaying ${replayPick}`, 'success')
+      load()
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Replay failed', 'critical')
+    }
+  }
+
+  const isRunning = demoState?.running
+  const isReplayRunning = replayState?.running
+  const ds = demoState?.state
+  const progressPct = ds && ds.total_beats > 0
+    ? Math.min(100, Math.round((ds.current_beat / ds.total_beats) * 100))
+    : 0
+  const rs = replayState?.state
+  const replayProgressPct = rs && rs.frames_total > 0
+    ? Math.min(100, Math.round((rs.frames_emitted / rs.frames_total) * 100))
+    : 0
+
+  return (
+    <div className="space-y-5">
+      <div className="card p-4 border-cyan-400/30 bg-cyan-500/5 flex items-start gap-3">
+        <Film className="w-5 h-5 text-cyan-300 mt-0.5 shrink-0"/>
+        <div className="text-xs text-cyan-100/90 leading-relaxed">
+          <div className="font-semibold mb-1">Cinematic demo + replay.</div>
+          Scripted scenarios drive the live UI through the real pipeline —
+          Emergency rows are inserted, dispatch_engine runs, MCI service
+          classifies victims. Every run captures its Socket.IO frames to a
+          JSONL file under <span className="font-mono">backend/replays/</span>;
+          replays re-emit those frames at any speed without touching the DB.
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Demo runner card */}
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Play className="w-3.5 h-3.5 text-emerald-400"/>
+            <div className="text-sm font-semibold">Demo runner</div>
+          </div>
+
+          <div className="mb-3">
+            <label className="field-label">Scenario</label>
+            <select className="field !py-1.5 text-xs" value={picked}
+                    disabled={isRunning}
+                    onChange={e => setPicked(e.target.value)}>
+              {scenarios.map(s => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.beats} beats)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <label className="field-label">Speed × {speed.toFixed(1)}</label>
+            <input type="range" min={0.5} max={10} step={0.5}
+                   value={speed} disabled={isRunning}
+                   onChange={e => setSpeed(Number(e.target.value))}
+                   className="w-full"/>
+            <div className="text-[10px] font-mono text-slate-500 mt-1">
+              0.5× = half speed · 10× = compressed for quick smoke
+            </div>
+          </div>
+
+          {ds && (
+            <div className="mb-3 p-2 rounded bg-ink-900/60 border border-line/40">
+              <div className="flex items-center justify-between text-[11px] font-mono">
+                <span className="text-slate-300">{ds.scenario}</span>
+                <span className={ds.error ? 'text-rose-400' : 'text-slate-400'}>
+                  beat {ds.current_beat}/{ds.total_beats}
+                </span>
+              </div>
+              <div className="h-1.5 bg-ink-950 rounded-full overflow-hidden mt-1.5">
+                <div className="h-full bg-emerald-400 transition-all"
+                     style={{ width: `${progressPct}%` }}/>
+              </div>
+              {ds.last_narration && (
+                <div className="text-[11px] text-slate-300 mt-2 italic">
+                  "{ds.last_narration}"
+                </div>
+              )}
+              {ds.error && (
+                <div className="text-[11px] text-rose-300 mt-1 font-mono">
+                  {ds.error}
+                </div>
+              )}
+              <div className="text-[10px] font-mono text-slate-500 mt-1">
+                {ds.events_captured} events captured
+                {ds.finished ? ' · finished' : ''}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            {!isRunning ? (
+              <button onClick={startDemo} className="btn-primary text-xs flex-1">
+                <Play className="w-3 h-3 inline mr-1"/> Start scenario
+              </button>
+            ) : (
+              <button onClick={stopDemo} className="btn-ghost text-xs flex-1
+                                                   !border-rose-400/40 !text-rose-200">
+                <Square className="w-3 h-3 inline mr-1"/> Stop
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Replay card */}
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <RotateCw className="w-3.5 h-3.5 text-cyan-300"/>
+            <div className="text-sm font-semibold">Replay capture</div>
+          </div>
+
+          <div className="mb-3">
+            <label className="field-label">
+              Captured session{' '}
+              <span className="text-slate-500">({captures.length})</span>
+            </label>
+            <select className="field !py-1.5 text-xs" value={replayPick}
+                    disabled={isReplayRunning}
+                    onChange={e => setReplayPick(e.target.value)}>
+              {captures.length === 0 && <option value="">No captures yet</option>}
+              {captures.map(c => (
+                <option key={c.session_id} value={c.session_id}>
+                  {c.session_id} · {c.frames} frames
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <label className="field-label">Speed × {replaySpeed.toFixed(1)}</label>
+            <input type="range" min={0.5} max={20} step={0.5}
+                   value={replaySpeed} disabled={isReplayRunning}
+                   onChange={e => setReplaySpeed(Number(e.target.value))}
+                   className="w-full"/>
+            <div className="text-[10px] font-mono text-slate-500 mt-1">
+              Replay re-emits the captured Socket.IO frames; no DB writes.
+            </div>
+          </div>
+
+          {rs && (
+            <div className="mb-3 p-2 rounded bg-ink-900/60 border border-line/40">
+              <div className="flex items-center justify-between text-[11px] font-mono">
+                <span className="text-slate-300 truncate">{rs.session_id}</span>
+                <span className="text-slate-400">
+                  {rs.frames_emitted}/{rs.frames_total}
+                </span>
+              </div>
+              <div className="h-1.5 bg-ink-950 rounded-full overflow-hidden mt-1.5">
+                <div className="h-full bg-cyan-400 transition-all"
+                     style={{ width: `${replayProgressPct}%` }}/>
+              </div>
+              <div className="text-[10px] font-mono text-slate-500 mt-1">
+                speed × {rs.speed?.toFixed(1)}{rs.finished ? ' · finished' : ''}
+              </div>
+            </div>
+          )}
+
+          <button onClick={startReplay}
+                  disabled={!replayPick || isReplayRunning}
+                  className="btn-primary text-xs w-full disabled:opacity-50">
+            <RotateCw className="w-3 h-3 inline mr-1"/>
+            {isReplayRunning ? 'Replaying…' : 'Start replay'}
+          </button>
+        </div>
       </div>
     </div>
   )
