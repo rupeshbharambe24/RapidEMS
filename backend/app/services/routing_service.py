@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..core.logging import log
 from ..observability.metrics import record_routing, record_routing_fallback
+from .chaos import is_routing_provider_down
 
 
 # ── Result schema ──────────────────────────────────────────────────────────
@@ -222,6 +223,13 @@ async def route(
     if chain:
         async with httpx.AsyncClient(timeout=httpx.Timeout(6.0)) as client:
             for name, fn in chain:
+                # Phase 3.10 chaos hook — let admin force a provider into
+                # the failure branch without actually breaking the API key.
+                if is_routing_provider_down(name):
+                    record_routing(name, ok=False, latency_seconds=0.0)
+                    last_err = f"{name}: chaos-injected outage"
+                    log.info(f"routing — skipping {name}: chaos-injected outage")
+                    continue
                 t0 = time.time()
                 try:
                     result = await fn(client, a, b)

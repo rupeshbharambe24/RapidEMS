@@ -16,6 +16,8 @@ from ..core.policy import enforce as policy_enforce, list_policy, reload_policy
 from ..core.security import hash_password
 from ..database import get_db
 from ..services.audit_chain import verify_chain
+from ..services.chaos import (KNOWN_SCENARIOS, clear as chaos_clear,
+                              inject as chaos_inject, status as chaos_status)
 from ..services.data_retention import (patient_erasure, patient_export_bundle,
                                        run_retention_sweep)
 from ..services.demo_runner import (list_captures, list_scenarios,
@@ -565,3 +567,74 @@ async def replay_status_route(_: User = Depends(require_role("admin"))):
     state = replay_status()
     return DemoStatusOut(running=bool(state and not state.get("finished")),
                          state=state)
+
+
+# ── Chaos lab (Phase 3.10) ────────────────────────────────────────────────
+class ChaosInjectIn(BaseModel):
+    scenario: str = Field(...,
+        description="One of: routing_provider_down, severity_predictor_slow, "
+                    "dispatch_failure_rate.")
+    provider: Optional[str] = Field(default=None,
+        description="routing_provider_down: osrm/ors/mapbox/here, or '*' for all.")
+    delay_ms: Optional[int] = Field(default=None, ge=0, le=10000,
+        description="severity_predictor_slow: synthetic delay before predict.")
+    rate: Optional[float] = Field(default=None, ge=0.0, le=1.0,
+        description="dispatch_failure_rate: fraction of dispatch attempts to fail.")
+
+
+class ChaosOut(BaseModel):
+    scenario: str
+    injected_at: float
+    seed: int
+    provider: Optional[str] = None
+    delay_ms: Optional[int] = None
+    rate: Optional[float] = None
+
+
+class ChaosStatusOut(BaseModel):
+    available_scenarios: List[str]
+    active: List[ChaosOut]
+
+
+class ChaosClearOut(BaseModel):
+    cleared: int
+
+
+@router.get("/chaos", response_model=ChaosStatusOut)
+async def chaos_state(_: User = Depends(require_role("admin"))):
+    return ChaosStatusOut(
+        available_scenarios=sorted(KNOWN_SCENARIOS),
+        active=[ChaosOut(**rec) for rec in chaos_status()],
+    )
+
+
+@router.post("/chaos/inject", response_model=ChaosOut, status_code=201)
+async def chaos_inject_route(payload: ChaosInjectIn,
+                             _: User = Depends(require_role("admin"))):
+    """Register a fault. Validates that the right param is supplied for
+    the chosen scenario before activating."""
+    s = payload.scenario
+    if s == "routing_provider_down":
+        if not payload.provider:
+            raise HTTPException(422, detail="provider is required (osrm/ors/mapbox/here/*).")
+        rec = chaos_inject(s, provider=payload.provider)
+    elif s == "severity_predictor_slow":
+        if payload.delay_ms is None:
+            raise HTTPException(422, detail="delay_ms is required.")
+        rec = chaos_inject(s, delay_ms=payload.delay_ms)
+    elif s == "dispatch_failure_rate":
+        if payload.rate is None:
+            raise HTTPException(422, detail="rate is required (0.0-1.0).")
+        rec = chaos_inject(s, rate=payload.rate)
+    else:
+        raise HTTPException(404,
+            detail=f"Unknown scenario '{s}'. "
+                   f"Available: {sorted(KNOWN_SCENARIOS)}")
+    return ChaosOut(**rec)
+
+
+@router.post("/chaos/clear", response_model=ChaosClearOut)
+async def chaos_clear_route(scenario: Optional[str] = Query(default=None),
+                            _: User = Depends(require_role("admin"))):
+    """Clear a single scenario by name, or all when no name is given."""
+    return ChaosClearOut(cleared=chaos_clear(scenario))
