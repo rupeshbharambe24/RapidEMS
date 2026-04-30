@@ -10,6 +10,7 @@ from ..models.emergency import Emergency, EmergencyStatus
 from ..schemas.dispatch import DispatchPlan
 from ..schemas.emergency import EmergencyCreate, EmergencyOut, EmergencyUpdate
 from ..services.dispatch_engine import DispatchError, dispatch_emergency
+from ..services.drone_recon import dispatch_drone, should_auto_dispatch
 from ..sockets.sio import emit_emergency_created, emit_emergency_dispatched
 from .deps import get_current_user
 
@@ -37,6 +38,20 @@ async def create_emergency(
         "chief_complaint": emergency.chief_complaint,
         "symptoms": emergency.symptoms,
     })
+    # Phase 3.6 — auto-launch a recon drone for serious calls so the
+    # dispatcher sees the scene before the first ground unit arrives.
+    if should_auto_dispatch(
+        severity=emergency.predicted_severity,
+        is_multi_casualty=emergency.is_multi_casualty,
+        chief_complaint=emergency.chief_complaint,
+    ):
+        background.add_task(
+            dispatch_drone,
+            emergency_id=emergency.id,
+            target_lat=emergency.location_lat,
+            target_lng=emergency.location_lng,
+            chief_complaint=emergency.chief_complaint,
+        )
     return EmergencyOut.model_validate(emergency)
 
 
