@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
   AlertCircle, Heart, Hospital as HospitalIcon, MapPin, Clock,
-  Truck, Loader2, Activity, ShieldOff,
+  Truck, Loader2, Activity, ShieldOff, Phone, MessageSquare, Send,
 } from 'lucide-react'
 
 import { trackingApi } from '../api/client.js'
@@ -160,9 +160,29 @@ export default function FamilyTracking() {
             </div>
           )}
           {snap.hospital_name && (
-            <div className="flex items-center gap-2 text-sm mb-1">
-              <HospitalIcon className="w-4 h-4 text-emerald-400"/>
-              <span className="truncate">{snap.hospital_name}</span>
+            <div className="text-sm mb-2">
+              <div className="flex items-center gap-2">
+                <HospitalIcon className="w-4 h-4 text-emerald-400 shrink-0"/>
+                <span className="truncate">{snap.hospital_name}</span>
+              </div>
+              {snap.hospital_address && (
+                <div className="text-[11px] text-slate-400 ml-6 mt-0.5">
+                  {snap.hospital_address}
+                </div>
+              )}
+              {snap.hospital_emergency_phone && (
+                <a href={`tel:${snap.hospital_emergency_phone}`}
+                   className="ml-6 mt-0.5 text-[11px] font-mono text-cyan-300 inline-flex items-center gap-1">
+                  <Phone className="w-3 h-3"/>{snap.hospital_emergency_phone}
+                </a>
+              )}
+              {snap.hospital_lat && snap.hospital_lng && (
+                <a href={`https://www.google.com/maps/dir/?api=1&destination=${snap.hospital_lat},${snap.hospital_lng}`}
+                   target="_blank" rel="noreferrer"
+                   className="ml-6 mt-0.5 text-[11px] text-cyan-300 inline-flex items-center gap-1">
+                  <MapPin className="w-3 h-3"/>directions
+                </a>
+              )}
             </div>
           )}
           {snap.severity_level && (
@@ -179,7 +199,103 @@ export default function FamilyTracking() {
             Link expires in ~{expiresMin}m
           </div>
         </div>
+
+        {/* Notes panel — bottom-left on desktop, full-width on mobile */}
+        <NotesPanel snap={snap} token={token}
+                    onAdded={(n) => setSnap(s => s ? {...s, notes:[...(s.notes || []), n]} : s)}/>
       </div>
+    </div>
+  )
+}
+
+
+function NotesPanel({ snap, token, onAdded }) {
+  const [draft, setDraft] = useState('')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [open, setOpen] = useState(false)
+
+  // Auto-expand once there's at least one note.
+  useEffect(() => {
+    if (snap.notes?.length > 0) setOpen(true)
+  }, [snap.notes?.length])
+
+  async function send(e) {
+    e.preventDefault()
+    if (!draft.trim()) return
+    setBusy(true); setErr(null)
+    try {
+      const note = await trackingApi.postNote(token, {
+        message: draft.trim(),
+        sender_name: name.trim() || null,
+      })
+      onAdded(note)
+      setDraft('')
+    } catch (er) {
+      setErr(er?.response?.data?.detail || 'Could not send.')
+    } finally { setBusy(false) }
+  }
+
+  const notes = snap.notes || []
+  return (
+    <div className="absolute left-3 right-3 sm:left-3 sm:right-auto sm:w-[320px] bottom-3
+                    card p-3 backdrop-blur-md bg-ink-900/85 z-[400]
+                    sm:bottom-3 max-h-[60vh] flex flex-col">
+      <button type="button" onClick={() => setOpen(o => !o)}
+              className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.16em] text-slate-300">
+        <MessageSquare className="w-3 h-3 text-cyan-300"/>
+        notes ({notes.length})
+        <span className="text-slate-500 ml-auto">{open ? '▾' : '▸'}</span>
+      </button>
+
+      {open && (
+        <>
+          <div className="flex-1 overflow-y-auto mt-2 space-y-1.5">
+            {notes.length === 0 && (
+              <div className="text-[11px] text-slate-500 italic">
+                Leave a quick update for the patient + dispatcher.
+              </div>
+            )}
+            {notes.map((n, i) => (
+              <div key={i} className={`text-xs leading-snug px-2 py-1.5 rounded ${
+                n.sender_role === 'dispatcher' ? 'bg-amber-400/10 text-amber-100' :
+                n.sender_role === 'patient'    ? 'bg-emerald-400/10 text-emerald-100' :
+                'bg-cyan-400/10 text-cyan-100'
+              }`}>
+                <div className="flex items-baseline gap-1.5 mb-0.5">
+                  <span className="font-mono text-[10px] uppercase opacity-70">
+                    {n.sender_role}
+                  </span>
+                  {n.sender_name && (
+                    <span className="text-[10px] opacity-80">· {n.sender_name}</span>
+                  )}
+                  <span className="ml-auto text-[9px] font-mono opacity-50">
+                    {new Date(n.created_at).toLocaleTimeString()}
+                  </span>
+                </div>
+                {n.message}
+              </div>
+            ))}
+          </div>
+
+          <form onSubmit={send} className="mt-2 pt-2 border-t border-line/30 space-y-1.5">
+            <input type="text" value={name} onChange={e => setName(e.target.value)}
+                   placeholder="your name (optional)"
+                   className="field !py-1 text-xs"/>
+            <div className="flex gap-1.5">
+              <input type="text" value={draft} onChange={e => setDraft(e.target.value)}
+                     maxLength={400} placeholder="quick update…"
+                     className="field !py-1 text-xs flex-1"/>
+              <button type="submit" disabled={busy || !draft.trim()}
+                      className="btn-ghost !px-2 !py-1 text-xs disabled:opacity-40">
+                {busy ? <Loader2 className="w-3 h-3 animate-spin"/> : <Send className="w-3 h-3"/>}
+              </button>
+            </div>
+            {err && <div className="text-[10px] text-red-300">{err}</div>}
+          </form>
+        </>
+      )}
     </div>
   )
 }
