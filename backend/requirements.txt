@@ -21,6 +21,7 @@ bcrypt==4.0.1
 argon2-cffi==23.1.0
 pyotp==2.9.0
 slowapi==0.1.9
+casbin==1.36.3
 
 # --- Real-time ---
 python-socketio==5.11.4
