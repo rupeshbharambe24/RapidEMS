@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from .api import (admin, ai as ai_routes, ambulances, analytics, auth,
                   copilot, dispatches, driver, emergencies, hospital_portal,
-                  hospitals, notifications, patient, routing, tracking)
+                  hospitals, notifications, patient, public, routing, tracking)
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
@@ -97,6 +97,7 @@ app.include_router(admin.router)
 app.include_router(notifications.router)
 app.include_router(tracking.router)
 app.include_router(copilot.router)
+app.include_router(public.router)
 
 
 @app.get("/", tags=["meta"])

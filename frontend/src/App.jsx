@@ -15,6 +15,7 @@ import AmbulanceDriverDashboard from './pages/AmbulanceDriverDashboard.jsx'
 import HospitalPortal from './pages/HospitalPortal.jsx'
 import Admin from './pages/Admin.jsx'
 import FamilyTracking from './pages/FamilyTracking.jsx'
+import PublicDashboard from './pages/PublicDashboard.jsx'
 
 import { connectSocket, disconnectSocket } from './api/socket.js'
 import { useAuthStore } from './store/auth.js'
@@ -34,6 +35,9 @@ export default function App() {
 
       {/* Public next-of-kin tracking — no auth, token-only */}
       <Route path="/track/:token" element={<FamilyTracking />} />
+
+      {/* Public city transparency dashboard — no auth, no PHI */}
+      <Route path="/city" element={<PublicDashboard />} />
 
       {/* Patient surface — own chrome, no dispatcher sidebar */}
       <Route path="/patient" element={
