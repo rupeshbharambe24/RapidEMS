@@ -6,11 +6,12 @@ import {
 import {
   Truck, Phone, MapPin, ChevronRight, AlertCircle, Loader2, LogOut,
   Heart, Hospital as HospitalIcon, Activity, CheckCircle2, RotateCcw,
-  AlertTriangle, FileWarning, WifiOff, CloudOff,
+  AlertTriangle, FileWarning, WifiOff, CloudOff, ShieldCheck, ShieldX,
+  ChevronDown,
 } from 'lucide-react'
 import L from 'leaflet'
 
-import { driverApi, ambulancesApi } from '../api/client.js'
+import { driverApi, ambulancesApi, insuranceApi } from '../api/client.js'
 import api from '../api/client.js'
 import { enqueue, flush, onFlush, pending } from '../utils/offline_queue.js'
 import { useAuthStore } from '../store/auth.js'
@@ -68,6 +69,10 @@ export default function AmbulanceDriverDashboard() {
   const [queueDepth, setQueueDepth] = useState(0)
   const [online, setOnline] = useState(typeof navigator !== 'undefined'
                                        ? navigator.onLine : true)
+  // Phase 3.9 — insurance verification result for the current dispatch.
+  // Reset whenever the dispatch_id changes so a new patient doesn't
+  // inherit the previous patient's coverage.
+  const [insurance, setInsurance] = useState(null)
   const watchIdRef = useRef(null)
 
   // ── Initial load + claim picker if no ambulance yet ─────────────────────
@@ -161,6 +166,11 @@ export default function AmbulanceDriverDashboard() {
       toast(err?.response?.data?.detail || 'Claim failed', 'critical')
     } finally { setBusy(false) }
   }
+
+  // Reset insurance state when the dispatch changes — new patient on board.
+  useEffect(() => {
+    setInsurance(null)
+  }, [me?.active_dispatch?.id])
 
   async function advance() {
     if (!me?.active_dispatch) return
@@ -333,13 +343,35 @@ export default function AmbulanceDriverDashboard() {
               <div className="flex items-start gap-2 mb-2">
                 <HospitalIcon className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0"/>
                 <div className="text-sm">
-                  <div className="font-semibold">{h.name}</div>
+                  <div className="font-semibold flex items-center gap-1.5">
+                    {h.name}
+                    {insurance?.covered
+                      && insurance.in_network_hospital_ids?.includes(h.id) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider
+                                       text-emerald-300 bg-emerald-500/10 border border-emerald-500/40
+                                       rounded px-1.5 py-0.5">
+                        <ShieldCheck className="w-2.5 h-2.5"/> in-network
+                      </span>
+                    )}
+                    {insurance?.covered
+                      && !insurance.in_network_hospital_ids?.includes(h.id) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider
+                                       text-amber-200 bg-amber-500/10 border border-amber-500/40
+                                       rounded px-1.5 py-0.5">
+                        <ShieldX className="w-2.5 h-2.5"/> out-of-network
+                      </span>
+                    )}
+                  </div>
                   <div className="text-slate-500 text-xs">
                     {h.specialties?.slice(0,3).join(' · ')}
                   </div>
                 </div>
               </div>
             )}
+
+            {/* Insurance verification (Phase 3.9) */}
+            <InsurancePanel insurance={insurance} setInsurance={setInsurance}
+                            patientName={e?.patient_name}/>
 
             {/* Clinical context — blood group + allergies + chronic conditions */}
             {(me.patient_blood_group || me.patient_allergies
@@ -477,6 +509,110 @@ function ClaimScreen({ fleet, onClaim, busy, user, onLogout }) {
           </div>
         </div>
       </main>
+    </div>
+  )
+}
+
+
+// ── Insurance verification sub-panel (Phase 3.9) ────────────────────────
+// Collapsed by default so the dashboard stays calm; expands when the
+// paramedic taps the chevron. Card numbers prefixed DENY- come back as
+// uncovered (demo aid baked into the backend).
+function InsurancePanel({ insurance, setInsurance, patientName }) {
+  const [open, setOpen] = useState(false)
+  const [cardNumber, setCardNumber] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  async function verify(e) {
+    e?.preventDefault?.()
+    if (!cardNumber.trim() || busy) return
+    setBusy(true); setErr(null)
+    try {
+      const r = await insuranceApi.verify({
+        card_number: cardNumber.trim(),
+        patient_name: patientName || null,
+      })
+      setInsurance(r)
+      // Collapse after a successful verify so the badge does the talking;
+      // keep open on a denial so the paramedic can re-enter the card.
+      if (r.covered) setOpen(false)
+    } catch (e) {
+      setErr(e?.response?.data?.detail || 'Verify failed')
+    } finally { setBusy(false) }
+  }
+
+  // Inline verified pill — visible regardless of open/closed.
+  const pill = insurance && (
+    insurance.covered ? (
+      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider
+                       text-emerald-300">
+        <ShieldCheck className="w-3 h-3"/>
+        {insurance.payer_name}{insurance.copay_inr === 0 ? ' · no copay' : ` · ₹${insurance.copay_inr} copay`}
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider
+                       text-amber-200">
+        <ShieldX className="w-3 h-3"/>
+        {insurance.reason === 'policy_inactive' ? 'no active policy' : 'not covered'}
+      </span>
+    )
+  )
+
+  return (
+    <div className={`mb-2 rounded border ${
+      insurance?.covered ? 'border-emerald-500/30 bg-emerald-500/5'
+        : insurance ? 'border-amber-500/30 bg-amber-500/5'
+        : 'border-line/40 bg-ink-700/30'}`}>
+      <button type="button"
+              onClick={() => setOpen(o => !o)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-left">
+        {insurance?.covered
+          ? <ShieldCheck className="w-3.5 h-3.5 text-emerald-400"/>
+          : insurance
+            ? <ShieldX className="w-3.5 h-3.5 text-amber-300"/>
+            : <ShieldCheck className="w-3.5 h-3.5 text-slate-500"/>}
+        <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 flex-1">
+          {insurance ? 'insurance' : 'verify insurance'}
+        </span>
+        {pill}
+        <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform
+                                 ${open ? 'rotate-180' : ''}`}/>
+      </button>
+
+      {open && (
+        <form onSubmit={verify}
+              className="px-2 pb-2 pt-0.5 border-t border-line/30 space-y-2">
+          <div className="flex gap-1.5">
+            <input className="field !py-1.5 text-xs flex-1" placeholder="Card / policy number"
+                   value={cardNumber}
+                   onChange={e => setCardNumber(e.target.value)}/>
+            <button type="submit" disabled={busy || !cardNumber.trim()}
+                    className="btn-primary text-xs px-3 disabled:opacity-50">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : 'Verify'}
+            </button>
+          </div>
+          {err && (
+            <div className="text-[11px] text-rose-300">{err}</div>
+          )}
+          {insurance?.covered && (
+            <div className="text-[11px] text-emerald-200/90 leading-relaxed">
+              Active through <span className="font-mono">{insurance.effective_through}</span>{' · '}
+              {insurance.in_network_hospital_ids?.length || 0} in-network hospital(s)
+              {insurance.accepts_specialties?.length > 0 && (
+                <> · covers {insurance.accepts_specialties.slice(0, 4).join(', ')}</>
+              )}
+            </div>
+          )}
+          {insurance && !insurance.covered && (
+            <div className="text-[11px] text-amber-200/80">
+              {insurance.reason === 'policy_inactive'
+                ? 'Policy inactive on the payer registry. Patient may self-pay; flag at intake.'
+                : `Verify result: ${insurance.reason}`}
+            </div>
+          )}
+        </form>
+      )}
     </div>
   )
 }
