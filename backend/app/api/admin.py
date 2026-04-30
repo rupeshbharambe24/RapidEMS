@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.policy import enforce as policy_enforce, list_policy, reload_policy
 from ..core.security import hash_password
 from ..database import get_db
+from ..services.audit_chain import verify_chain
+from ..services.data_retention import (patient_erasure, patient_export_bundle,
+                                       run_retention_sweep)
 from ..models.ambulance import Ambulance, AmbulanceStatus
 from ..models.audit_log import AuditLog
 from ..models.dispatch import Dispatch
@@ -22,7 +25,6 @@ from ..models.emergency import Emergency
 from ..models.hospital import Hospital
 from ..models.user import User, UserRole
 from ..schemas.user import UserOut
-from ..services.audit_chain import verify_chain
 from .deps import require_role
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -198,6 +200,58 @@ class PolicyTestOut(BaseModel):
     obj: str
     act: str
     allowed: bool
+
+
+class RetentionRunOut(BaseModel):
+    counts: dict
+
+
+class ErasureOut(BaseModel):
+    counts: dict
+
+
+@router.post("/retention/sweep", response_model=RetentionRunOut)
+async def retention_sweep(
+    resolved_redact_days: int = Query(90, ge=7, le=3650),
+    revoked_link_delete_days: int = Query(30, ge=1, le=365),
+    telemetry_delete_days: int = Query(180, ge=7, le=3650),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    """Age out PHI per the configured windows. Idempotent — runs against
+    whatever currently qualifies; safe to re-run on a cron."""
+    counts = await run_retention_sweep(
+        db,
+        resolved_redact_days=resolved_redact_days,
+        revoked_link_delete_days=revoked_link_delete_days,
+        telemetry_delete_days=telemetry_delete_days,
+    )
+    return RetentionRunOut(counts=counts)
+
+
+@router.get("/dsr/export/{profile_id}")
+async def dsr_export(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    """Subject Access Request — full data dump for one patient."""
+    return await patient_export_bundle(db, profile_id)
+
+
+@router.post("/dsr/erase/{profile_id}", response_model=ErasureOut)
+async def dsr_erase(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(require_role("admin")),
+):
+    """Right-to-erasure. Hard-deletes patient profile + records +
+    telemetry + family_links; redacts PII from past emergencies (the
+    rows themselves stay so dispatch + audit history remains
+    referentially intact). Records an audit-log row capturing the
+    erasure event so the SHA-256 chain still holds."""
+    counts = await patient_erasure(db, profile_id, requested_by_user_id=me.id)
+    return ErasureOut(counts=counts)
 
 
 @router.get("/policy", response_model=List[PolicyRow])
