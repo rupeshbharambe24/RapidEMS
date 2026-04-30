@@ -113,17 +113,23 @@
 .leaflet-popup-close-button { color: #94a3b8 !important; }
 
 /* ── Custom marker icons (we use divIcon so styles flow through) ── */
-.amb-marker, .hosp-marker, .emerg-marker {
+.amb-marker, .hosp-marker, .emerg-marker, .drone-marker {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 999px;
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
   color: white; box-shadow: 0 4px 14px -2px rgba(0,0,0,.5);
 }
-.emerg-pulse {
+.emerg-pulse, .drone-pulse {
   position: absolute; inset: -6px;
   border-radius: 999px;
-  background: rgba(239,68,68,.45);
   animation: pulseRing 1.6s cubic-bezier(0.19,1,0.22,1) infinite;
+}
+.drone-marker {
+  /* Slightly square so the quad-rotor SVG isn't clipped. */
+  border-radius: 6px;
+}
+.drone-pulse {
+  border-radius: 6px;
 }
 
 /* ── Custom scrollbar ───────────────────────────────── */

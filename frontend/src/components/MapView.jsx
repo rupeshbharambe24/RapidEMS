@@ -2,10 +2,11 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import { useEffect } from 'react'
 
 import { useAmbulancesStore } from '../store/ambulances.js'
+import { useDronesStore } from '../store/drones.js'
 import { useEmergenciesStore } from '../store/emergencies.js'
 import { useHospitalsStore } from '../store/hospitals.js'
 import { useDispatchesStore } from '../store/dispatches.js'
-import { ambulanceIcon, hospitalIcon, emergencyIcon } from '../utils/icons.js'
+import { ambulanceIcon, droneIcon, hospitalIcon, emergencyIcon } from '../utils/icons.js'
 import { AmbStatusPill, SeverityPill } from './StatusBadge.jsx'
 import { fmtKm, fmtRelative } from '../utils/format.js'
 
@@ -28,6 +29,7 @@ export default function MapView({
   showHospitals  = true,
   showEmergencies= true,
   showRoutes     = true,
+  showDrones     = true,
   children,
   flyTo        = null,
   className    = '',
@@ -36,6 +38,16 @@ export default function MapView({
   const hospitals   = useHospitalsStore(s => s.items)
   const emergencies = useEmergenciesStore(s => s.items).filter(e => e.status !== 'resolved' && e.status !== 'cancelled')
   const active      = useDispatchesStore(s => s.active)
+  const drones      = useDronesStore(s => s.items)
+  const previews    = useDronesStore(s => s.previews)
+  const previewById = drones.reduce((acc, d) => {
+    if (d.current_emergency_id) {
+      const p = previews.find(x => x.drone_id === d.id
+                                   && x.emergency_id === d.current_emergency_id)
+      if (p) acc[d.id] = p
+    }
+    return acc
+  }, {})
 
   return (
     <div className={`relative w-full h-full ${className}`}>
@@ -54,6 +66,47 @@ export default function MapView({
         />
 
         <FlyTo center={flyTo} zoom={flyTo ? 14 : null} />
+
+        {/* Drones — only render in-flight birds (depot drones would
+            clutter the map and overlap the dispatcher's home view). */}
+        {showDrones && drones
+          .filter(d => d.status !== 'available' && d.current_lat != null
+                       && d.current_lng != null)
+          .map(d => {
+            const preview = previewById[d.id]
+            return (
+              <Marker key={`d${d.id}`}
+                      position={[d.current_lat, d.current_lng]}
+                      icon={droneIcon(d.status)}>
+                <Popup>
+                  <div className="font-mono font-semibold mb-1">{d.registration}</div>
+                  <div className="text-xs text-slate-300 capitalize mb-1">
+                    {d.status.replace('_', ' ')}
+                    {d.current_emergency_id ? ` · scene #${d.current_emergency_id}` : ''}
+                  </div>
+                  {d.sensor_payload?.length > 0 && (
+                    <div className="text-[10px] text-slate-400 mb-1.5 font-mono uppercase tracking-wider">
+                      {d.sensor_payload.join(' · ')}
+                    </div>
+                  )}
+                  {preview && (
+                    <div className="mt-2 border-t border-slate-700 pt-2 text-xs">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-purple-300 mb-1">
+                        Aerial scene preview
+                      </div>
+                      <div>~{preview.victim_estimate} victim(s)</div>
+                      {preview.hazards?.length > 0 && (
+                        <div className="text-rose-300">
+                          ⚠ {preview.hazards.join(', ')}
+                        </div>
+                      )}
+                      <div className="text-slate-400 mt-1">{preview.notes}</div>
+                    </div>
+                  )}
+                </Popup>
+              </Marker>
+            )
+          })}
 
         {/* Hospitals */}
         {showHospitals && hospitals.map(h => (
