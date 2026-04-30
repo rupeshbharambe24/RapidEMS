@@ -100,11 +100,20 @@ async def _dispatch_emergency_inner(
     *,
     forced_ambulance: Optional[Ambulance] = None,
 ) -> DispatchPlan:
+    # Phase 3.10 chaos hook — admin can dial up a synthetic dispatch
+    # failure rate to verify retry / re-route logic.
+    from .chaos import maybe_delay_severity, maybe_fail_dispatch
+    chaos_reason = maybe_fail_dispatch(emergency.id)
+    if chaos_reason:
+        raise DispatchError(chaos_reason)
+
     ai = get_ai_service()
     now = datetime.utcnow()
     used_fallback = False
 
     # ── 1. Triage ─────────────────────────────────────────
+    await maybe_delay_severity()
+
     triage = ai.predict_severity(
         age=emergency.patient_age or 40,
         gender=emergency.patient_gender or "other",
