@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # ── LLM extraction (optional) ──
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Groq's free-tier Whisper for voice-first dispatcher. v3-turbo runs
+    # at ~250x realtime so even a 30 s caller clip is back in well under
+    # a second.
+    groq_whisper_model: str = "whisper-large-v3-turbo"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     llm_provider_order: str = "groq,gemini"
