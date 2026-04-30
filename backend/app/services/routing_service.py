@@ -3,8 +3,9 @@
 Provider chain (env-key gated, all free tiers):
   1. OSRM self-hosted    (if OSRM_URL set)             unlimited, no key
   2. OpenRouteService    (if ORS_API_KEY set)          2000 req/day free
-  3. HERE Routes v8      (if HERE_API_KEY set)         250K req/month free
-  4. Haversine fallback  (always available)
+  3. Mapbox Directions   (if MAPBOX_API_KEY set)       100K req/month free
+  4. HERE Routes v8      (if HERE_API_KEY set)         250K req/month free
+  5. Haversine fallback  (always available)
 
 Returns RouteResult with seconds, meters, polyline (GeoJSON [[lng,lat],…]),
 congestion estimate, provider name, and used_fallback flag.
@@ -131,6 +132,32 @@ async def _ors(client: httpx.AsyncClient,
     )
 
 
+async def _mapbox(client: httpx.AsyncClient,
+                  a: Tuple[float, float], b: Tuple[float, float]) -> RouteResult:
+    coords = f"{a[1]},{a[0]};{b[1]},{b[0]}"
+    url = f"https://api.mapbox.com/directions/v5/mapbox/driving-traffic/{coords}"
+    params = {
+        "alternatives": "false",
+        "geometries": "geojson",
+        "overview": "full",
+        "access_token": settings.mapbox_api_key,
+    }
+    r = await client.get(url, params=params)
+    r.raise_for_status()
+    data = r.json()
+    if data.get("code") != "Ok" or not data.get("routes"):
+        raise RuntimeError(f"Mapbox rejected: {data.get('code')}")
+    route = data["routes"][0]
+    poly = route.get("geometry", {}).get("coordinates") or []
+    return RouteResult(
+        seconds=float(route["duration"]),
+        meters=float(route["distance"]),
+        polyline=poly,
+        congestion=_congestion_from_speed(route["distance"], route["duration"]),
+        provider="mapbox",
+    )
+
+
 async def _here(client: httpx.AsyncClient,
                 a: Tuple[float, float], b: Tuple[float, float]) -> RouteResult:
     url = "https://router.hereapi.com/v8/routes"
@@ -182,6 +209,8 @@ async def route(
         chain.append(("osrm", _osrm))
     if settings.ors_api_key:
         chain.append(("openrouteservice", _ors))
+    if settings.mapbox_api_key:
+        chain.append(("mapbox", _mapbox))
     if settings.here_api_key:
         chain.append(("here", _here))
 

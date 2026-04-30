@@ -12,6 +12,7 @@ class AmbulanceType(str, enum.Enum):
     BLS = "bls"          # Basic Life Support
     ALS = "als"          # Advanced Life Support
     ICU_MOBILE = "icu"   # Mobile ICU
+    HELICOPTER = "helicopter"   # Air ambulance — Phase 1.1 dispatch tier
 
 
 class AmbulanceStatus(str, enum.Enum):

@@ -51,6 +51,12 @@ class DispatchPlan(BaseModel):
     skill_bonus: Optional[float] = None
     predicted_er_wait_minutes: Optional[int] = None
 
+    # Phase 1.1 ─ helicopter dispatch tier
+    air_dispatch_proposed: bool = False
+    air_dispatch_reason: Optional[str] = None
+    air_eta_minutes: Optional[float] = None
+    air_distance_km: Optional[float] = None
+
 
 class RoutePreview(BaseModel):
     """Response for the GET /routing/preview endpoint."""

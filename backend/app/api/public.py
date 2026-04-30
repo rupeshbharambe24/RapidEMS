@@ -74,6 +74,7 @@ class PublicHospital(BaseModel):
     total_beds_burns: int
     er_wait_minutes: int
     is_diversion: bool
+    has_helipad: bool = False
     quality_rating: Optional[int] = None
 
 

@@ -44,9 +44,22 @@ class Settings(BaseSettings):
     # HERE (250K/month) -> haversine. Empty values skip that provider.
     osrm_url: str = ""                 # e.g. http://localhost:5000
     ors_api_key: str = ""              # https://openrouteservice.org/dev/
+    mapbox_api_key: str = ""           # https://account.mapbox.com/
     here_api_key: str = ""             # https://platform.here.com/
     # Blend weight for road ETA vs ML ETA when both are available.
     eta_road_weight: float = 0.7
+
+    # Helicopter dispatch tier — air alternative for SEV-1 calls when
+    # ground transit is far enough that the lift+land overhead pays for
+    # itself. Speed in km/h; setup is ground-time before takeoff + after
+    # landing in minutes.
+    helicopter_speed_kmh: float = 220.0
+    helicopter_setup_minutes: float = 4.0
+    # Only consider air dispatch when ground ETA is at least this many
+    # minutes longer than the air alternative.
+    helicopter_min_savings_minutes: float = 6.0
+    # Furthest helipad we'll fly to from the scene.
+    helicopter_max_range_km: float = 60.0
 
     # ── Notifications (all optional, all free tier) ──
     # Telegram bot — talk to @BotFather to make one. Recipients must /start
