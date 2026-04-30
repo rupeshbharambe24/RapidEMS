@@ -177,6 +177,14 @@ export const copilotApi = {
     api.post('/copilot/ask', { query, context }).then(r => r.data),
 }
 
+// ─────────── Drones (Phase 3.6) ───────────
+export const dronesApi = {
+  list:     ()                  => api.get('/drones').then(r => r.data),
+  active:   ()                  => api.get('/drones/active').then(r => r.data),
+  dispatch: (emergency_id)      => api.post('/drones/dispatch',
+                                    { emergency_id }).then(r => r.data),
+}
+
 // ─────────── Wearable telemetry ───────────
 export const telemetryApi = {
   ingest: (readings)         => api.post('/telemetry/batch', { readings }).then(r => r.data),
