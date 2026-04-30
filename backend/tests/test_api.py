@@ -1,39 +1,13 @@
-"""End-to-end smoke tests."""
-import asyncio
-import os, sys
-from pathlib import Path
+"""End-to-end smoke tests.
 
-# Use a separate test database
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["SEED_ON_STARTUP"] = "true"
-
-# Ensure backend package is importable
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
+The session-scoped ``_bootstrap_test_db`` fixture in ``conftest.py``
+takes care of creating + seeding the test database before any test
+module runs.
+"""
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database import create_all_tables, AsyncSessionLocal
 from app.main import app
-from app.seed import seed_database
-
-
-@pytest.fixture(scope="module", autouse=True)
-def setup_module():
-    # Wipe any old test db
-    test_db = Path("./test.db")
-    if test_db.exists():
-        test_db.unlink()
-
-    async def _bootstrap():
-        await create_all_tables()
-        async with AsyncSessionLocal() as db:
-            await seed_database(db, force=True)
-
-    asyncio.run(_bootstrap())
-    yield
-    if test_db.exists():
-        test_db.unlink()
 
 
 @pytest.fixture
