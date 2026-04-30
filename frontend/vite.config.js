@@ -34,5 +34,22 @@ export default defineConfig({
       '/socket.io':     { target: 'http://localhost:8000', changeOrigin: true, ws: true },
     },
   },
-  build: { outDir: 'dist', sourcemap: false },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Pull the heavy third-party libs out of the main bundle so the
+        // app shell loads fast and tile / chart / icon code only fetches
+        // when the relevant page does.
+        manualChunks: {
+          'leaflet':  ['leaflet', 'react-leaflet'],
+          'charts':   ['recharts'],
+          'icons':    ['lucide-react'],
+          'realtime': ['socket.io-client'],
+          'react':    ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
 })
