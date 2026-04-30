@@ -6,6 +6,7 @@ import {
 import {
   Truck, Phone, MapPin, ChevronRight, AlertCircle, Loader2, LogOut,
   Heart, Hospital as HospitalIcon, Activity, CheckCircle2, RotateCcw,
+  AlertTriangle, FileWarning,
 } from 'lucide-react'
 import L from 'leaflet'
 
@@ -273,6 +274,49 @@ export default function AmbulanceDriverDashboard() {
                     {h.specialties?.slice(0,3).join(' · ')}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Clinical context — blood group + allergies + chronic conditions */}
+            {(me.patient_blood_group || me.patient_allergies
+              || me.patient_chronic_conditions || me.patient_current_medications) && (
+              <div className="mb-2 px-2 py-1.5 rounded bg-ink-700/40 text-[11px] space-y-0.5">
+                {me.patient_blood_group && (
+                  <div className="flex gap-2"><span className="text-slate-500 w-16 shrink-0">blood</span>
+                    <span className="font-mono">{me.patient_blood_group}</span></div>
+                )}
+                {me.patient_allergies && (
+                  <div className="flex gap-2"><span className="text-amber-400 w-16 shrink-0">allergy</span>
+                    <span className="text-amber-200">{me.patient_allergies}</span></div>
+                )}
+                {me.patient_chronic_conditions && (
+                  <div className="flex gap-2"><span className="text-slate-500 w-16 shrink-0">chronic</span>
+                    <span>{me.patient_chronic_conditions}</span></div>
+                )}
+                {me.patient_current_medications && (
+                  <div className="flex gap-2"><span className="text-slate-500 w-16 shrink-0">meds</span>
+                    <span className="text-slate-300">{me.patient_current_medications}</span></div>
+                )}
+              </div>
+            )}
+
+            {/* Drug interaction warnings */}
+            {me.drug_warnings?.length > 0 && (
+              <div className="mb-3 p-2 rounded border border-amber-400/40 bg-amber-400/5">
+                <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase tracking-wider text-amber-200">
+                  <FileWarning className="w-3 h-3"/>drug-interaction warnings ({me.drug_warnings.length})
+                </div>
+                <ul className="space-y-1">
+                  {me.drug_warnings.map((w, i) => (
+                    <li key={i} className="text-[11px] flex gap-1.5 leading-snug">
+                      <AlertTriangle className={`w-3 h-3 mt-0.5 shrink-0 ${
+                        w.tier === 'major' ? 'text-sig-critical' : 'text-amber-300'}`}/>
+                      <span className={w.tier === 'major' ? 'text-red-200' : 'text-amber-100'}>
+                        {w.note}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

@@ -34,6 +34,8 @@ from ..schemas.ambulance import AmbulanceOut
 from ..schemas.dispatch import DispatchOut
 from ..schemas.emergency import EmergencyOut
 from ..schemas.hospital import HospitalOut
+from ..models.patient_profile import PatientProfile
+from ..services.ml_extras import drug_interaction_warnings
 from ..services.notifications import notify_dispatch_status
 from ..services.routing_service import route as road_route
 from ..sockets.sio import emit_ambulance_position, emit_ambulance_status
@@ -81,6 +83,11 @@ class DriverAssignment(BaseModel):
     hospital: Optional[HospitalOut] = None
     leg_to_scene: Optional[dict] = None
     leg_to_hospital: Optional[dict] = None
+    drug_warnings: Optional[list] = None
+    patient_allergies: Optional[str] = None
+    patient_chronic_conditions: Optional[str] = None
+    patient_current_medications: Optional[str] = None
+    patient_blood_group: Optional[str] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -194,6 +201,18 @@ async def my_assignment(
                 "used_fallback": r2.used_fallback,
             }
 
+    # Patient profile flyout — clinical context the paramedic can act on.
+    profile: Optional[PatientProfile] = None
+    drug_warnings: Optional[list] = None
+    if emergency and emergency.phone:
+        profile = await db.scalar(
+            select(PatientProfile).where(PatientProfile.phone == emergency.phone))
+    if profile and profile.current_medications:
+        drug_warnings = drug_interaction_warnings(
+            current_medications=profile.current_medications,
+            patient_type=emergency.inferred_patient_type if emergency else None,
+        )["warnings"]
+
     return DriverAssignment(
         ambulance=AmbulanceOut.model_validate(amb),
         active_dispatch=DispatchOut.model_validate(dispatch) if dispatch else None,
@@ -201,6 +220,11 @@ async def my_assignment(
         hospital=HospitalOut.model_validate(hospital) if hospital else None,
         leg_to_scene=leg_to_scene,
         leg_to_hospital=leg_to_hospital,
+        drug_warnings=drug_warnings,
+        patient_allergies=profile.allergies if profile else None,
+        patient_chronic_conditions=profile.chronic_conditions if profile else None,
+        patient_current_medications=profile.current_medications if profile else None,
+        patient_blood_group=profile.blood_group if profile else None,
     )
 
 
