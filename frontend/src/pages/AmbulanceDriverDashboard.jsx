@@ -6,11 +6,13 @@ import {
 import {
   Truck, Phone, MapPin, ChevronRight, AlertCircle, Loader2, LogOut,
   Heart, Hospital as HospitalIcon, Activity, CheckCircle2, RotateCcw,
-  AlertTriangle, FileWarning,
+  AlertTriangle, FileWarning, WifiOff, CloudOff,
 } from 'lucide-react'
 import L from 'leaflet'
 
 import { driverApi, ambulancesApi } from '../api/client.js'
+import api from '../api/client.js'
+import { enqueue, flush, onFlush, pending } from '../utils/offline_queue.js'
 import { useAuthStore } from '../store/auth.js'
 import { useUiStore } from '../store/ui.js'
 
@@ -63,6 +65,9 @@ export default function AmbulanceDriverDashboard() {
   const [fleet, setFleet] = useState([])
   const [busy, setBusy] = useState(false)
   const [advancing, setAdvancing] = useState(false)
+  const [queueDepth, setQueueDepth] = useState(0)
+  const [online, setOnline] = useState(typeof navigator !== 'undefined'
+                                       ? navigator.onLine : true)
   const watchIdRef = useRef(null)
 
   // ── Initial load + claim picker if no ambulance yet ─────────────────────
@@ -95,8 +100,15 @@ export default function AmbulanceDriverDashboard() {
     if (!me?.ambulance || !navigator.geolocation) return
     if (watchIdRef.current) return  // already watching
     watchIdRef.current = navigator.geolocation.watchPosition(
-      pos => {
-        driverApi.pushGps(pos.coords.latitude, pos.coords.longitude).catch(() => {})
+      async pos => {
+        const lat = pos.coords.latitude, lng = pos.coords.longitude
+        try {
+          await driverApi.pushGps(lat, lng)
+        } catch {
+          // Network drop or server unreachable — queue for replay.
+          await enqueue('PATCH', '/driver/location', { lat, lng })
+          setQueueDepth(await pending())
+        }
       },
       () => {},
       { enableHighAccuracy: true, maximumAge: 8000, timeout: 10000 },
@@ -108,6 +120,36 @@ export default function AmbulanceDriverDashboard() {
       }
     }
   }, [me?.ambulance?.id])
+
+  // ── Online / offline + queue replay ────────────────────────────────────
+  useEffect(() => {
+    async function refreshDepth() { setQueueDepth(await pending()) }
+    refreshDepth()
+
+    async function doFlush() {
+      const r = await flush(api)
+      const dep = await pending()
+      setQueueDepth(dep)
+      if (r.sent > 0 && dep === 0) {
+        toast(`Synced ${r.sent} queued update${r.sent === 1 ? '' : 's'}.`, 'success')
+      }
+    }
+    function onOnline() { setOnline(true); doFlush() }
+    function onOffline() { setOnline(false) }
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    const off = onFlush(doFlush)   // SW background-sync handoff
+
+    // Best-effort flush on mount in case there's leftover queue from a
+    // previous session.
+    if (navigator.onLine) doFlush()
+
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+      off?.()
+    }
+  }, [])
 
   async function claim(ambId) {
     setBusy(true)
@@ -127,7 +169,16 @@ export default function AmbulanceDriverDashboard() {
       await driverApi.advance()
       setMe(await driverApi.me())
     } catch (err) {
-      toast(err?.response?.data?.detail || 'Status advance failed', 'critical')
+      // Network error — queue and let the user keep moving. Server-side
+      // 4xx responses (legal-transition violations etc.) are still surfaced.
+      const offlineLike = !err?.response || err?.code === 'ERR_NETWORK'
+      if (offlineLike) {
+        await enqueue('PATCH', '/driver/status', { target: null })
+        setQueueDepth(await pending())
+        toast('No signal — status update queued, will sync.', 'info')
+      } else {
+        toast(err?.response?.data?.detail || 'Status advance failed', 'critical')
+      }
     } finally { setAdvancing(false) }
   }
 
@@ -178,6 +229,19 @@ export default function AmbulanceDriverDashboard() {
             {amb.registration_number} · {amb.ambulance_type.toUpperCase()}
           </div>
         </div>
+        {!online && (
+          <div className="flex items-center gap-1 px-2 py-1 rounded border border-amber-400/50
+                          text-amber-300 text-[10px] font-mono uppercase tracking-wider">
+            <WifiOff className="w-3 h-3"/>offline
+          </div>
+        )}
+        {queueDepth > 0 && (
+          <div className="flex items-center gap-1 px-2 py-1 rounded border border-cyan-400/40
+                          text-cyan-300 text-[10px] font-mono uppercase tracking-wider"
+               title="Queued updates that will sync when the radio comes back">
+            <CloudOff className="w-3 h-3"/>{queueDepth}
+          </div>
+        )}
         {status && (
           <div className={`px-2 py-1 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_TINT[status] || ''}`}>
             {status.replace('_',' ')}
