@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Users, ShieldCheck, ClipboardList, BarChart3, Loader2, Plus, Trash2,
-  Pencil, X, Check, Filter,
+  Pencil, X, Check, Filter, Zap, AlertTriangle,
 } from 'lucide-react'
 
 import { adminApi } from '../api/client.js'
@@ -12,6 +12,7 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'users',    label: 'Users',    icon: Users },
   { id: 'audit',    label: 'Audit',    icon: ClipboardList },
+  { id: 'chaos',    label: 'Chaos lab', icon: Zap },
 ]
 
 const ROLES = ['dispatcher', 'paramedic', 'hospital_staff', 'admin', 'patient']
@@ -46,6 +47,7 @@ export default function Admin() {
         {tab === 'overview' && <OverviewTab/>}
         {tab === 'users'    && <UsersTab me={me}/>}
         {tab === 'audit'    && <AuditTab/>}
+        {tab === 'chaos'    && <ChaosTab/>}
       </div>
     </div>
   )
@@ -391,6 +393,185 @@ function Loader() {
   return (
     <div className="flex items-center gap-2 text-slate-500 text-sm">
       <Loader2 className="w-4 h-4 animate-spin"/> loading…
+    </div>
+  )
+}
+
+
+// ── Chaos lab ──────────────────────────────────────────────────────────────
+const SCENARIO_HINTS = {
+  routing_provider_down: {
+    title: 'Routing provider outage',
+    description: 'Force a named routing provider (osrm/ors/mapbox/here, or *) ' +
+      'to fail every call. Verifies the chain falls through to the next ' +
+      'provider — and ultimately the haversine fallback.',
+  },
+  severity_predictor_slow: {
+    title: 'Slow severity predictor',
+    description: 'Inject a synthetic delay before the severity classifier ' +
+      'returns. Demonstrates that callers tolerate slow AI without blocking ' +
+      'the dispatch path.',
+  },
+  dispatch_failure_rate: {
+    title: 'Dispatch failure injection',
+    description: 'Deterministic per-emergency coin flip; failed attempts ' +
+      'raise DispatchError with chaos: prefix. Stress-tests retry / ' +
+      're-route logic.',
+  },
+}
+
+function ChaosTab() {
+  const toast = useUiStore(s => s.toast)
+  const [state, setState] = useState(null)
+  const [params, setParams] = useState({
+    routing_provider_down: { provider: '*' },
+    severity_predictor_slow: { delay_ms: 800 },
+    dispatch_failure_rate: { rate: 0.5 },
+  })
+
+  async function load() {
+    try { setState(await adminApi.chaosState()) }
+    catch (e) { toast(e?.response?.data?.detail || 'Load failed', 'critical') }
+  }
+  useEffect(() => { load() }, [])
+
+  async function inject(scenario) {
+    try {
+      await adminApi.chaosInject({ scenario, ...params[scenario] })
+      toast(`Injected ${scenario}`, 'success')
+      load()
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Inject failed', 'critical')
+    }
+  }
+
+  async function clear(scenario) {
+    try {
+      const r = await adminApi.chaosClear(scenario)
+      toast(scenario ? `Cleared ${scenario}` : `Cleared ${r.cleared} scenario(s)`,
+            'success')
+      load()
+    } catch (e) {
+      toast(e?.response?.data?.detail || 'Clear failed', 'critical')
+    }
+  }
+
+  const activeByName = useMemo(() => {
+    const m = {}
+    for (const a of state?.active || []) m[a.scenario] = a
+    return m
+  }, [state])
+
+  if (!state) return <Loader/>
+
+  return (
+    <div className="space-y-5">
+      <div className="card p-4 border-amber-500/30 bg-amber-500/5 flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 shrink-0"/>
+        <div className="text-xs text-amber-100/90 leading-relaxed">
+          <div className="font-semibold mb-1">Chaos lab — admin only.</div>
+          Injected faults stay active until cleared or until the backend
+          restarts. Nothing here mutates the database; effects are confined to
+          live request paths. Use during demos to show graceful degradation,
+          and clear before real traffic.
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-mono uppercase tracking-[0.16em] text-slate-400">
+          {state.active.length} active · {state.available_scenarios.length} available
+        </div>
+        {state.active.length > 0 && (
+          <button onClick={() => clear()} className="btn-ghost text-xs">
+            Clear all
+          </button>
+        )}
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        {state.available_scenarios.map(s => {
+          const hint = SCENARIO_HINTS[s] || { title: s, description: '' }
+          const active = activeByName[s]
+          const p = params[s] || {}
+          return (
+            <div key={s} className={`card p-4 ${active ? 'border-amber-400/60 bg-amber-500/5' : ''}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className={`w-3.5 h-3.5 ${active ? 'text-amber-400' : 'text-slate-500'}`}/>
+                <div className="text-sm font-semibold">{hint.title}</div>
+              </div>
+              <div className="text-[11px] text-slate-400 leading-relaxed mb-3">
+                {hint.description}
+              </div>
+
+              {s === 'routing_provider_down' && (
+                <div className="mb-3">
+                  <label className="field-label">Provider</label>
+                  <select className="field !py-1.5 text-xs" value={p.provider}
+                          onChange={e => setParams(x => ({ ...x, [s]: { provider: e.target.value } }))}>
+                    <option value="*">All providers</option>
+                    <option value="osrm">osrm</option>
+                    <option value="ors">ors</option>
+                    <option value="mapbox">mapbox</option>
+                    <option value="here">here</option>
+                  </select>
+                </div>
+              )}
+              {s === 'severity_predictor_slow' && (
+                <div className="mb-3">
+                  <label className="field-label">Delay (ms)</label>
+                  <input className="field !py-1.5 text-xs" type="number" min={0} max={10000}
+                         value={p.delay_ms}
+                         onChange={e => setParams(x => ({ ...x, [s]: { delay_ms: Number(e.target.value) } }))}/>
+                </div>
+              )}
+              {s === 'dispatch_failure_rate' && (
+                <div className="mb-3">
+                  <label className="field-label">Failure rate</label>
+                  <input type="range" min={0} max={1} step={0.05}
+                         value={p.rate}
+                         onChange={e => setParams(x => ({ ...x, [s]: { rate: Number(e.target.value) } }))}
+                         className="w-full"/>
+                  <div className="text-[10px] font-mono text-slate-400 mt-1">
+                    {(p.rate * 100).toFixed(0)}% of dispatch attempts fail
+                  </div>
+                </div>
+              )}
+
+              {active && (
+                <div className="mt-2 mb-3 p-2 rounded bg-ink-900/60 border border-amber-400/30">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-amber-300 mb-1">
+                    Active
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-300">
+                    {Object.entries(active)
+                      .filter(([k]) => !['scenario', 'injected_at', 'seed'].includes(k))
+                      .filter(([, v]) => v !== null && v !== undefined)
+                      .map(([k, v]) => `${k}=${v}`).join(' · ')}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                {!active ? (
+                  <button onClick={() => inject(s)} className="btn-primary text-xs flex-1">
+                    Inject
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => inject(s)} className="btn-ghost text-xs flex-1">
+                      Re-inject
+                    </button>
+                    <button onClick={() => clear(s)} className="btn-ghost text-xs flex-1
+                                                              !border-amber-400/40 !text-amber-200">
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
