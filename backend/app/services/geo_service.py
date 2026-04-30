@@ -29,6 +29,20 @@ def estimate_zone_id(lat: float, lng: float, n_zones: int = 12) -> int:
     return (row * 4 + col) % n_zones
 
 
+def zone_center(zone_id: int) -> Tuple[float, float]:
+    """Inverse of ``estimate_zone_id`` — returns the (lat, lng) centroid
+    of a zone's grid cell. Used by the pre-positioning planner so it has
+    a target point to send idle ambulances to."""
+    z = zone_id % 12
+    row = z // 4
+    col = z % 4
+    # Cell origin at city - (0.05, 0.06) with 0.04 cell size; centre is
+    # cell origin + half the cell size.
+    lat = settings.seed_city_lat - 0.05 + 0.02 + 0.04 * row
+    lng = settings.seed_city_lng - 0.06 + 0.02 + 0.04 * col
+    return lat, lng
+
+
 def simple_route(
     start_lat: float, start_lng: float, end_lat: float, end_lng: float,
     n_points: int = 20,

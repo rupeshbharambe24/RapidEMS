@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from ..config import settings
 from ..core.logging import log
+from ..observability.metrics import record_llm
 from ..schemas.llm import ExtractedEmergency
 
 
@@ -126,11 +127,15 @@ class LLMExtractor:
                         t0 = time.perf_counter()
                         raw = await self._call_groq(client, user_msg)
                         parsed = self._parse_to_schema(raw)
+                        latency_ms = int((time.perf_counter() - t0) * 1000)
+                        record_llm("groq", "extract", ok=True,
+                                   latency_ms=latency_ms)
                         meta.update({"provider_used": "groq",
-                                     "latency_ms": int((time.perf_counter() - t0) * 1000)})
+                                     "latency_ms": latency_ms})
                         return parsed, meta
                     except Exception as exc:  # noqa: BLE001
                         last_err = f"groq: {exc}"
+                        record_llm("groq", "extract", ok=False)
                         log.warning(f"LLM extractor — Groq failed: {exc}")
                         continue
                 if provider == "gemini" and self.has_gemini:
@@ -138,11 +143,15 @@ class LLMExtractor:
                         t0 = time.perf_counter()
                         raw = await self._call_gemini(client, user_msg)
                         parsed = self._parse_to_schema(raw)
+                        latency_ms = int((time.perf_counter() - t0) * 1000)
+                        record_llm("gemini", "extract", ok=True,
+                                   latency_ms=latency_ms)
                         meta.update({"provider_used": "gemini",
-                                     "latency_ms": int((time.perf_counter() - t0) * 1000)})
+                                     "latency_ms": latency_ms})
                         return parsed, meta
                     except Exception as exc:  # noqa: BLE001
                         last_err = f"gemini: {exc}"
+                        record_llm("gemini", "extract", ok=False)
                         log.warning(f"LLM extractor — Gemini failed: {exc}")
                         continue
 
@@ -151,6 +160,60 @@ class LLMExtractor:
         meta.update({"provider_used": "heuristic", "used_fallback": True,
                      "error": last_err or "no providers configured"})
         return parsed, meta
+
+    async def extract_multimodal(
+        self, *,
+        transcript: Optional[str] = None,
+        language_hint: Optional[str] = None,
+        image_b64: Optional[str] = None,
+        image_mime: Optional[str] = None,
+        audio_b64: Optional[str] = None,
+        audio_mime: Optional[str] = None,
+    ) -> Tuple[ExtractedEmergency, dict]:
+        """Multimodal path. Forces Gemini (Groq is text-only). Falls
+        through to the heuristic skim of any text supplied if Gemini
+        is unconfigured or errors."""
+        meta = {"provider_used": None, "used_fallback": False,
+                "latency_ms": None, "error": None}
+        if not (transcript or image_b64 or audio_b64):
+            return ExtractedEmergency(), {**meta, "used_fallback": True,
+                                          "error": "no input"}
+
+        if not self.has_gemini:
+            parsed = self._heuristic_extract(transcript or "")
+            return parsed, {**meta, "provider_used": "heuristic",
+                            "used_fallback": True,
+                            "error": "Gemini key not configured (multimodal "
+                                     "requires Gemini)"}
+
+        prompt_text = (transcript or "").strip()
+        if language_hint:
+            prompt_text = f"[caller language hint: {language_hint}]\n{prompt_text}"
+        if image_b64 and not transcript:
+            prompt_text += "\nThe attached image shows the patient or scene; " \
+                           "infer visible injuries, severity tier, and patient_type."
+        if audio_b64 and not transcript:
+            prompt_text += "\nThe attached audio is the caller speaking — " \
+                           "transcribe it (any language) and extract the fields."
+
+        try:
+            t0 = time.perf_counter()
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                raw = await self._call_gemini(
+                    client, prompt_text or " ",
+                    image_b64=image_b64, image_mime=image_mime,
+                    audio_b64=audio_b64, audio_mime=audio_mime,
+                )
+            parsed = self._parse_to_schema(raw)
+            meta.update({"provider_used": "gemini",
+                         "latency_ms": int((time.perf_counter() - t0) * 1000)})
+            return parsed, meta
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"LLM extractor — multimodal Gemini failed: {exc}")
+            parsed = self._heuristic_extract(transcript or "")
+            meta.update({"provider_used": "heuristic", "used_fallback": True,
+                         "error": f"gemini: {exc}"})
+            return parsed, meta
 
     # ── provider implementations ───────────────────────────────────────
     async def _call_groq(self, client: httpx.AsyncClient, transcript: str) -> str:
@@ -171,11 +234,35 @@ class LLMExtractor:
         data = r.json()
         return data["choices"][0]["message"]["content"]
 
-    async def _call_gemini(self, client: httpx.AsyncClient, transcript: str) -> str:
+    async def _call_gemini(self, client: httpx.AsyncClient, transcript: str,
+                           *, image_b64: Optional[str] = None,
+                           image_mime: Optional[str] = None,
+                           audio_b64: Optional[str] = None,
+                           audio_mime: Optional[str] = None) -> str:
         url = GEMINI_URL.format(model=settings.gemini_model)
+        # Gemini takes any mix of text + image + audio in a single contents
+        # array; order matters for context (text first reads as the
+        # framing, image/audio after as the supporting modality).
+        user_parts: list[dict] = []
+        if transcript:
+            user_parts.append({"text": transcript})
+        if image_b64:
+            user_parts.append({"inline_data": {
+                "mime_type": image_mime or "image/jpeg",
+                "data": image_b64,
+            }})
+        if audio_b64:
+            user_parts.append({"inline_data": {
+                "mime_type": audio_mime or "audio/mpeg",
+                "data": audio_b64,
+            }})
+        if not user_parts:
+            raise ValueError("Gemini call needs at least one of "
+                             "transcript / image / audio.")
+
         body = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"role": "user", "parts": [{"text": transcript}]}],
+            "contents": [{"role": "user", "parts": user_parts}],
             "generationConfig": {
                 "response_mime_type": "application/json",
                 "temperature": 0.1,

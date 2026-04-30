@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMapEvents, useMap } from 'react-leaflet'
-import { Activity, Send, Sparkles, MapPin, Loader2, MessageSquareText, Wand2 } from 'lucide-react'
+import {
+  Activity, Send, Sparkles, MapPin, Loader2, MessageSquareText, Wand2,
+  Info, ChevronDown, ChevronUp, Camera, Mic, Square, X as XIcon,
+} from 'lucide-react'
 
 import MapView from '../components/MapView.jsx'
 import { SeverityPill } from '../components/StatusBadge.jsx'
@@ -70,6 +73,18 @@ export default function EmergencyForm() {
   const [transcript, setTranscript] = useState('')
   const [extracting, setExtracting] = useState(false)
   const [extractMeta, setExtractMeta] = useState(null)
+  // Multimodal attachments
+  const [imageData, setImageData] = useState(null)   // { base64, mime, preview }
+  const [audioData, setAudioData] = useState(null)   // { base64, mime, blobUrl }
+  const [recording, setRecording] = useState(false)
+  const recorderRef = useRef(null)
+  const recordedChunksRef = useRef([])
+  const photoInputRef = useRef(null)
+
+  // Triage explanation
+  const [explain, setExplain] = useState(null)
+  const [explainBusy, setExplainBusy] = useState(false)
+  const [showExplain, setShowExplain] = useState(false)
 
   const triagePayload = useMemo(() => ({
     age: parseInt(form.patient_age) || 40,
@@ -105,10 +120,148 @@ export default function EmergencyForm() {
     return () => clearTimeout(debounceRef.current)
   }, [triagePayload])
 
+  // Reset explain whenever the triage changes — the explanation must reflect
+  // the current SEV, not a stale one.
+  useEffect(() => { setExplain(null); setShowExplain(false) },
+           [triage?.severity_level, triage?.confidence])
+
+  async function fetchExplain() {
+    if (!triage) return
+    setShowExplain(true)
+    if (explain) return  // cached
+    setExplainBusy(true)
+    try {
+      const inline = Object.fromEntries(
+        Object.entries(triagePayload).filter(([, v]) => v !== null)
+      )
+      setExplain(await aiApi.explain({ inline }))
+    } catch (err) {
+      toast(err?.response?.data?.detail || 'Explain failed', 'critical')
+      setShowExplain(false)
+    } finally { setExplainBusy(false) }
+  }
+
   const toggleSymptom = (s) => {
     setForm(f => ({ ...f,
       symptoms: f.symptoms.includes(s) ? f.symptoms.filter(x => x !== s) : [...f.symptoms, s]
     }))
+  }
+
+  // Apply an ExtractionResult into the form state, fill-only-if-empty
+  // semantics so user typed values are preserved.
+  function applyExtraction(resp) {
+    const x = resp.extracted || {}
+    const fill = (cur, val) => (cur !== '' && cur !== undefined && cur !== null) ? cur : (val ?? '')
+    setForm(f => ({
+      ...f,
+      patient_age:               fill(f.patient_age, x.patient_age),
+      patient_gender:            f.patient_gender !== 'male' ? f.patient_gender : (x.patient_gender || f.patient_gender),
+      pulse_rate:                fill(f.pulse_rate, x.pulse_rate),
+      blood_pressure_systolic:   fill(f.blood_pressure_systolic, x.blood_pressure_systolic),
+      blood_pressure_diastolic:  fill(f.blood_pressure_diastolic, x.blood_pressure_diastolic),
+      respiratory_rate:          fill(f.respiratory_rate, x.respiratory_rate),
+      spo2:                      fill(f.spo2, x.spo2),
+      gcs_score:                 fill(f.gcs_score, x.gcs_score),
+      chief_complaint:           f.chief_complaint || x.chief_complaint || '',
+      location_address:          f.location_address || x.location_hint || '',
+      symptoms:                  Array.from(new Set([...f.symptoms, ...(x.symptoms || [])])),
+      inferred_patient_type:     x.patient_type || f.inferred_patient_type,
+    }))
+    setExtractMeta({
+      provider: resp.provider_used,
+      latency: resp.latency_ms,
+      used_fallback: resp.used_fallback,
+      language: x.language_detected,
+      severity_hint: x.severity_hint,
+      patient_type: x.patient_type,
+      error: resp.error,
+    })
+  }
+
+  // Photo attachment — file picker, reads as base64, fires multimodal extract.
+  function onPhotoPicked(e) {
+    const f = e.target.files?.[0]; if (!f) return
+    if (f.size > 4 * 1024 * 1024) {
+      toast('Photo too large (4 MB max).', 'critical')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '')
+      const base64 = dataUrl.split(',')[1] || ''
+      const mime = dataUrl.match(/^data:([^;]+);/)?.[1] || f.type || 'image/jpeg'
+      setImageData({ base64, mime, preview: dataUrl })
+      // Auto-fire extraction.
+      setExtracting(true)
+      try {
+        const resp = await aiApi.extractMultimodal({
+          transcript: transcript.trim() || null,
+          image_base64: base64,
+          image_mime: mime,
+        })
+        applyExtraction(resp)
+        const tag = resp.used_fallback ? 'heuristic fallback' : `via ${resp.provider_used}`
+        toast(`Photo parsed (${tag})`, resp.used_fallback ? 'info' : 'success')
+      } catch (err) {
+        toast(err?.response?.data?.detail || 'Photo extract failed', 'critical')
+      } finally { setExtracting(false) }
+    }
+    reader.readAsDataURL(f)
+  }
+
+  // Audio recording via browser MediaRecorder.
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast('Audio recording not supported in this browser.', 'critical'); return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeCandidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg']
+      const supported = mimeCandidates.find(m => window.MediaRecorder?.isTypeSupported?.(m))
+      const rec = new MediaRecorder(stream, supported ? { mimeType: supported } : undefined)
+      recordedChunksRef.current = []
+      rec.ondataavailable = (ev) => {
+        if (ev.data?.size > 0) recordedChunksRef.current.push(ev.data)
+      }
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(recordedChunksRef.current,
+          { type: supported || 'audio/webm' })
+        const arrBuf = await blob.arrayBuffer()
+        const bytes = new Uint8Array(arrBuf)
+        // Chunk-encode to base64 to avoid call-stack limits on long clips.
+        let binary = ''
+        const chunkSize = 0x8000
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize))
+        }
+        const base64 = btoa(binary)
+        const mime = blob.type || 'audio/webm'
+        setAudioData({ base64, mime, blobUrl: URL.createObjectURL(blob) })
+        setExtracting(true)
+        try {
+          const resp = await aiApi.extractMultimodal({
+            transcript: transcript.trim() || null,
+            audio_base64: base64, audio_mime: mime,
+          })
+          applyExtraction(resp)
+          const tag = resp.used_fallback ? 'heuristic fallback' : `via ${resp.provider_used}`
+          toast(`Audio parsed (${tag})`, resp.used_fallback ? 'info' : 'success')
+        } catch (err) {
+          toast(err?.response?.data?.detail || 'Audio extract failed', 'critical')
+        } finally { setExtracting(false) }
+      }
+      rec.start()
+      recorderRef.current = rec
+      setRecording(true)
+    } catch (err) {
+      toast('Could not access microphone.', 'critical')
+    }
+  }
+
+  function stopRecording() {
+    try { recorderRef.current?.stop() } catch {}
+    setRecording(false)
   }
 
   // Parse a free-text caller transcript into form fields. Existing user input
@@ -118,32 +271,7 @@ export default function EmergencyForm() {
     setExtracting(true)
     try {
       const resp = await aiApi.extract(transcript.trim())
-      const x = resp.extracted || {}
-      const fill = (cur, val) => (cur !== '' && cur !== undefined && cur !== null) ? cur : (val ?? '')
-      setForm(f => ({
-        ...f,
-        patient_age:               fill(f.patient_age, x.patient_age),
-        patient_gender:            f.patient_gender !== 'male' ? f.patient_gender : (x.patient_gender || f.patient_gender),
-        pulse_rate:                fill(f.pulse_rate, x.pulse_rate),
-        blood_pressure_systolic:   fill(f.blood_pressure_systolic, x.blood_pressure_systolic),
-        blood_pressure_diastolic:  fill(f.blood_pressure_diastolic, x.blood_pressure_diastolic),
-        respiratory_rate:          fill(f.respiratory_rate, x.respiratory_rate),
-        spo2:                      fill(f.spo2, x.spo2),
-        gcs_score:                 fill(f.gcs_score, x.gcs_score),
-        chief_complaint:           f.chief_complaint || x.chief_complaint || '',
-        location_address:          f.location_address || x.location_hint || '',
-        symptoms:                  Array.from(new Set([...f.symptoms, ...(x.symptoms || [])])),
-        inferred_patient_type:     x.patient_type || f.inferred_patient_type,
-      }))
-      setExtractMeta({
-        provider: resp.provider_used,
-        latency: resp.latency_ms,
-        used_fallback: resp.used_fallback,
-        language: x.language_detected,
-        severity_hint: x.severity_hint,
-        patient_type: x.patient_type,
-        error: resp.error,
-      })
+      applyExtraction(resp)
       const tag = resp.used_fallback ? 'heuristic fallback' : `via ${resp.provider_used}`
       toast(`Transcript parsed (${tag})`, resp.used_fallback ? 'info' : 'success')
     } catch (err) {
@@ -218,6 +346,28 @@ export default function EmergencyForm() {
                   ? <><Loader2 className="w-4 h-4 animate-spin"/> Parsing…</>
                   : <><Wand2 className="w-4 h-4"/> Auto-fill from transcript</>}
               </button>
+              <input ref={photoInputRef} type="file" accept="image/*"
+                     capture="environment" className="hidden"
+                     onChange={onPhotoPicked}/>
+              <button type="button" onClick={() => photoInputRef.current?.click()}
+                      disabled={extracting}
+                      className="btn-ghost px-3 disabled:opacity-40"
+                      title="Photo of patient/scene → multimodal extract">
+                <Camera className="w-4 h-4"/>
+              </button>
+              {!recording ? (
+                <button type="button" onClick={startRecording} disabled={extracting}
+                        className="btn-ghost px-3 disabled:opacity-40"
+                        title="Record voice → transcribe + extract">
+                  <Mic className="w-4 h-4"/>
+                </button>
+              ) : (
+                <button type="button" onClick={stopRecording}
+                        className="btn-ghost px-3 text-sig-critical animate-pulse"
+                        title="Stop recording">
+                  <Square className="w-4 h-4"/>
+                </button>
+              )}
               {transcript && (
                 <button
                   type="button"
@@ -226,6 +376,31 @@ export default function EmergencyForm() {
                 >Clear</button>
               )}
             </div>
+
+            {/* Attached media preview */}
+            {(imageData || audioData) && (
+              <div className="flex items-center gap-2 mt-2 text-[10px] font-mono">
+                {imageData && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded border border-cyan-400/40 bg-cyan-400/5">
+                    <img src={imageData.preview} alt="" className="w-8 h-8 object-cover rounded"/>
+                    <span className="text-cyan-200">photo</span>
+                    <button type="button" onClick={() => setImageData(null)}
+                            className="text-slate-400 hover:text-slate-100">
+                      <XIcon className="w-3 h-3"/>
+                    </button>
+                  </div>
+                )}
+                {audioData && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-400/40 bg-amber-400/5">
+                    <audio controls src={audioData.blobUrl} className="h-6"/>
+                    <button type="button" onClick={() => setAudioData(null)}
+                            className="text-slate-400 hover:text-slate-100">
+                      <XIcon className="w-3 h-3"/>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {extractMeta && (
               <div className={`mt-2 p-2 rounded border text-[10px] font-mono leading-relaxed
                   ${extractMeta.used_fallback
@@ -260,12 +435,59 @@ export default function EmergencyForm() {
               {triageBusy && <Loader2 className="w-3 h-3 animate-spin"/>}
             </div>
             {triage ? (
-              <div className="flex items-center justify-between gap-3">
-                <SeverityPill level={triage.severity_level} confidence={triage.confidence}/>
-                <span className="text-[10px] font-mono text-slate-500">
-                  {triage.used_fallback ? 'heuristic' : 'model'}
-                </span>
-              </div>
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <SeverityPill level={triage.severity_level} confidence={triage.confidence}/>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchExplain}
+                      disabled={explainBusy}
+                      className="btn-ghost text-[10px] px-2 py-1 disabled:opacity-40"
+                      title="Why this severity?"
+                    >
+                      {explainBusy
+                        ? <Loader2 className="w-3 h-3 animate-spin"/>
+                        : <Info className="w-3 h-3"/>}
+                      <span>why?</span>
+                      {showExplain
+                        ? <ChevronUp className="w-3 h-3"/>
+                        : <ChevronDown className="w-3 h-3"/>}
+                    </button>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {triage.used_fallback ? 'heuristic' : 'model'}
+                    </span>
+                  </div>
+                </div>
+                {showExplain && explain && (
+                  <div className="mt-2 pt-2 border-t border-line/30">
+                    <div className="text-xs text-slate-200 leading-relaxed mb-2">
+                      {explain.narrative}
+                    </div>
+                    {explain.factors?.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {explain.factors.slice(0, 5).map((f, i) => (
+                          <li key={i} className="flex items-center gap-2 text-[10px] font-mono">
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              f.impact === 'critical' ? 'bg-sig-critical' :
+                              f.impact === 'serious'  ? 'bg-sig-serious'  :
+                              f.impact === 'moderate' ? 'bg-sig-moderate' :
+                              'bg-slate-500'}`}/>
+                            <span className="text-slate-400">{f.name.replace('symptom:','').replace('_',' ')}</span>
+                            {f.value && !f.name.startsWith('symptom:') && (
+                              <span className="text-slate-200">{f.value}</span>
+                            )}
+                            <span className="text-slate-500">— {f.note}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="text-[9px] font-mono text-slate-600 mt-1.5">
+                      via {explain.provider}
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-sm text-slate-500">— enter vitals / symptoms —</div>
             )}

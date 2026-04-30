@@ -35,9 +35,53 @@ class Settings(BaseSettings):
     # ── LLM extraction (optional) ──
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Groq's free-tier Whisper for voice-first dispatcher. v3-turbo runs
+    # at ~250x realtime so even a 30 s caller clip is back in well under
+    # a second.
+    groq_whisper_model: str = "whisper-large-v3-turbo"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     llm_provider_order: str = "groq,gemini"
+
+    # ── Routing providers (optional, all free tier) ──
+    # Chain order: OSRM (self-hosted, unlimited) -> ORS (2000/day) ->
+    # HERE (250K/month) -> haversine. Empty values skip that provider.
+    osrm_url: str = ""                 # e.g. http://localhost:5000
+    ors_api_key: str = ""              # https://openrouteservice.org/dev/
+    mapbox_api_key: str = ""           # https://account.mapbox.com/
+    here_api_key: str = ""             # https://platform.here.com/
+    # Blend weight for road ETA vs ML ETA when both are available.
+    eta_road_weight: float = 0.7
+
+    # Helicopter dispatch tier — air alternative for SEV-1 calls when
+    # ground transit is far enough that the lift+land overhead pays for
+    # itself. Speed in km/h; setup is ground-time before takeoff + after
+    # landing in minutes.
+    helicopter_speed_kmh: float = 220.0
+    helicopter_setup_minutes: float = 4.0
+    # Only consider air dispatch when ground ETA is at least this many
+    # minutes longer than the air alternative.
+    helicopter_min_savings_minutes: float = 6.0
+    # Furthest helipad we'll fly to from the scene.
+    helicopter_max_range_km: float = 60.0
+
+    # ── Notifications (all optional, all free tier) ──
+    # Telegram bot — talk to @BotFather to make one. Recipients must /start
+    # the bot once, then their chat_id can receive sendMessage calls.
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = ""    # without the @ ; for the deep-link CTA
+    # SMTP — Gmail "App passwords" or SendGrid free tier (100/day) work.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from: str = ""
+    smtp_from_name: str = "RapidEMS"
+    # Twilio (paid, optional). Only enabled when both keys are set.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
 
     # ── CORS ──
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"

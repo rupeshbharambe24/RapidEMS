@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, PhoneCall, Truck, Building2, BarChart3, LogOut } from 'lucide-react'
+import { LayoutDashboard, PhoneCall, Truck, Building2, BarChart3, LogOut, ShieldCheck } from 'lucide-react'
 
 import { useAuthStore } from '../store/auth.js'
 
@@ -9,6 +9,10 @@ const NAV = [
   { to: '/ambulances', icon: Truck,           label: 'Fleet',       code: '03' },
   { to: '/hospitals',  icon: Building2,       label: 'Facilities',  code: '04' },
   { to: '/analytics',  icon: BarChart3,       label: 'Analytics',   code: '05' },
+]
+
+const ADMIN_NAV = [
+  { to: '/admin', icon: ShieldCheck, label: 'Admin', code: '00' },
 ]
 
 export default function Sidebar() {
@@ -49,6 +53,26 @@ export default function Sidebar() {
             <span className="ml-auto font-mono text-[10px] text-slate-500 group-hover:text-slate-400">{code}</span>
           </NavLink>
         ))}
+
+        {user?.role === 'admin' && (
+          <div className="pt-3 mt-3 border-t border-line/40 space-y-1">
+            {ADMIN_NAV.map(({ to, icon: Icon, label, code }) => (
+              <NavLink
+                key={to} to={to}
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 px-3 py-2 rounded text-sm transition-all
+                   ${isActive
+                      ? 'bg-amber-400/10 text-amber-200 border-l-2 border-amber-400 shadow-[inset_0_0_24px_-12px_rgba(251,191,36,.5)]'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-ink-800/60 border-l-2 border-transparent'}`
+                }
+              >
+                <Icon className="w-4 h-4 shrink-0" strokeWidth={2.2} />
+                <span className="font-medium">{label}</span>
+                <span className="ml-auto font-mono text-[10px] text-slate-500 group-hover:text-slate-400">{code}</span>
+              </NavLink>
+            ))}
+          </div>
+        )}
       </nav>
 
       {/* User block */}

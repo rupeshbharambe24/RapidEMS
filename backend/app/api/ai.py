@@ -1,12 +1,18 @@
 """Raw AI inference endpoints — exposed for the frontend's real-time triage hint."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schemas.ai import (ETARequest, ETAResponse, HotspotForecast,
+from ..database import get_db
+from ..models.emergency import Emergency
+from ..schemas.ai import (ETARequest, ETAResponse, ExplainRequest,
+                          ExplainResponse, HotspotForecast,
                           TrafficRequest, TrafficResponse,
                           TriageRequest, TriageResponse)
-from ..schemas.llm import ExtractionResult, TranscriptIn
+from ..schemas.llm import ExtractionResult, MultimodalIn, TranscriptIn
 from ..services.ai_service import get_ai_service
 from ..services.llm_extractor import get_llm_extractor
+from ..services.severity_explainer import explain as explain_severity
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -42,6 +48,67 @@ def predict_traffic(payload: TrafficRequest, ai=Depends(get_ai_service)):
                            used_fallback=out["used_fallback"])
 
 
+@router.post("/explain", response_model=ExplainResponse)
+async def explain_triage(
+    payload: ExplainRequest,
+    db: AsyncSession = Depends(get_db),
+    ai=Depends(get_ai_service),
+):
+    """Why was this call triaged at SEV-X? Returns top contributing factors
+    plus a short Groq-narrated paragraph for the dispatcher tooltip."""
+    if (payload.emergency_id is None) == (payload.inline is None):
+        raise HTTPException(400, detail="Provide exactly one of emergency_id or inline.")
+
+    if payload.emergency_id is not None:
+        e = await db.scalar(
+            select(Emergency).where(Emergency.id == payload.emergency_id))
+        if not e:
+            raise HTTPException(404, detail="Emergency not found.")
+        # Re-run severity in case it wasn't computed yet (e.g. PENDING).
+        triage = ai.predict_severity(
+            age=e.patient_age or 40,
+            gender=e.patient_gender or "other",
+            gcs=e.gcs_score, spo2=e.spo2,
+            pulse=e.pulse_rate, resp_rate=e.respiratory_rate,
+            bp_systolic=e.blood_pressure_systolic,
+            bp_diastolic=e.blood_pressure_diastolic,
+            symptoms=e.symptoms or [],
+        )
+        return await explain_severity(
+            severity_level=int(e.predicted_severity or triage["severity_level"]),
+            confidence=float(e.severity_confidence or triage["confidence"]),
+            used_fallback=triage["used_fallback"],
+            age=e.patient_age, gender=e.patient_gender,
+            pulse_rate=e.pulse_rate, spo2=e.spo2,
+            blood_pressure_systolic=e.blood_pressure_systolic,
+            blood_pressure_diastolic=e.blood_pressure_diastolic,
+            respiratory_rate=e.respiratory_rate, gcs_score=e.gcs_score,
+            symptoms=e.symptoms or [],
+        )
+
+    # Inline path — recompute severity from the supplied features.
+    inl = payload.inline
+    triage = ai.predict_severity(
+        age=inl.age, gender=inl.gender,
+        gcs=inl.gcs_score, spo2=inl.spo2,
+        pulse=inl.pulse_rate, resp_rate=inl.respiratory_rate,
+        bp_systolic=inl.blood_pressure_systolic,
+        bp_diastolic=inl.blood_pressure_diastolic,
+        symptoms=inl.symptoms,
+    )
+    return await explain_severity(
+        severity_level=triage["severity_level"],
+        confidence=triage["confidence"],
+        used_fallback=triage["used_fallback"],
+        age=inl.age, gender=inl.gender,
+        pulse_rate=inl.pulse_rate, spo2=inl.spo2,
+        blood_pressure_systolic=inl.blood_pressure_systolic,
+        blood_pressure_diastolic=inl.blood_pressure_diastolic,
+        respiratory_rate=inl.respiratory_rate, gcs_score=inl.gcs_score,
+        symptoms=inl.symptoms,
+    )
+
+
 @router.post("/extract", response_model=ExtractionResult)
 async def extract_transcript(payload: TranscriptIn):
     """Parse a free-text caller transcript into structured intake fields.
@@ -53,6 +120,32 @@ async def extract_transcript(payload: TranscriptIn):
     extractor = get_llm_extractor()
     parsed, meta = await extractor.extract(payload.transcript,
                                            language_hint=payload.language_hint)
+    return ExtractionResult(extracted=parsed, **meta)
+
+
+@router.post("/extract-multimodal", response_model=ExtractionResult)
+async def extract_multimodal(payload: MultimodalIn):
+    """Multimodal intake — accepts any mix of caller transcript, photo of
+    the patient/scene, and a recorded voice clip; routes through Gemini in
+    a single call and returns the same ExtractedEmergency shape.
+
+    The frontend Intake page wires this to a 'Photo' button and a 'Record'
+    button; the dispatcher can drop a snapshot of the injury and the model
+    pre-fills severity-tier symptoms (severe_burns, major_bleeding,
+    head_trauma) before any vitals are typed.
+    """
+    if not (payload.transcript or payload.image_base64 or payload.audio_base64):
+        raise HTTPException(400, detail=(
+            "Provide at least one of: transcript, image_base64, audio_base64."))
+    extractor = get_llm_extractor()
+    parsed, meta = await extractor.extract_multimodal(
+        transcript=payload.transcript,
+        language_hint=payload.language_hint,
+        image_b64=payload.image_base64,
+        image_mime=payload.image_mime,
+        audio_b64=payload.audio_base64,
+        audio_mime=payload.audio_mime,
+    )
     return ExtractionResult(extracted=parsed, **meta)
 
 

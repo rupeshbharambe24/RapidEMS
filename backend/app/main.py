@@ -5,19 +5,28 @@ Run with:
 or via the project root:
     python run.py
 """
+import time
 from contextlib import asynccontextmanager
 
 import socketio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-from .api import (ai as ai_routes, ambulances, analytics, auth, dispatches,
-                  emergencies, hospitals)
+from .api import (admin, ai as ai_routes, ambulances, analytics, ar, auth,
+                  copilot, dispatches, driver, drones, emergencies,
+                  hospital_portal, hospitals, insurance, mci, notifications,
+                  patient, public, routing, telemetry, tracking)
 from .config import settings
 from .core.logging import log
 from .core.startup_check import run_startup_checks
-from .database import SessionLocal, create_all_tables
+from .core.ratelimit import limiter
+from .database import AsyncSessionLocal, create_all_tables
+from .observability.metrics import (http_latency, http_requests,
+                                    refresh_gauges_from_db, render_metrics)
 from .seed import seed_database
 from .services.ai_service import get_ai_service
 from .sockets.sio import sio
@@ -32,13 +41,13 @@ async def lifespan(app: FastAPI):
     log.info("=" * 60)
 
     # 1. Tables
-    create_all_tables()
+    await create_all_tables()
     log.success("Database tables ready ✓")
 
     # 2. Seed
     if settings.seed_on_startup:
-        with SessionLocal() as db:
-            seed_database(db)
+        async with AsyncSessionLocal() as db:
+            await seed_database(db)
 
     # 3. Startup health checks (warns about missing model files)
     run_startup_checks()
@@ -69,6 +78,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiter (singleton lives in core.ratelimit so routers can decorate
+# without a circular import). Defaults are loose; sensitive endpoints opt
+# into tighter limits via @limiter.limit().
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.middleware("http")
+async def _metrics_middleware(request: Request, call_next):
+    """HTTP request count + latency histogram. Uses the route template
+    (``/emergencies/{id}``) rather than the concrete path to keep label
+    cardinality bounded."""
+    t0 = time.perf_counter()
+    response: Response = await call_next(request)
+    elapsed = time.perf_counter() - t0
+
+    route = request.url.path
+    # FastAPI exposes the matched APIRoute on request.scope["route"] — use
+    # its path template if available, fall back to the raw URL otherwise.
+    try:
+        scope_route = request.scope.get("route")
+        if scope_route and getattr(scope_route, "path", None):
+            route = scope_route.path
+    except Exception:  # noqa: BLE001
+        pass
+
+    status_class = f"{response.status_code // 100}xx"
+    http_requests.labels(method=request.method, route=route,
+                         status=status_class).inc()
+    http_latency.labels(method=request.method, route=route).observe(elapsed)
+    return response
+
+
+@app.get("/metrics", tags=["meta"], include_in_schema=False)
+async def metrics():
+    """Prometheus scrape target. Refreshes the system gauges from the DB
+    so each scrape sees fresh state."""
+    try:
+        await refresh_gauges_from_db()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"metrics: gauge refresh failed: {exc}")
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
+
 
 @app.exception_handler(Exception)
 async def universal_exception_handler(request, exc):
@@ -88,6 +142,20 @@ app.include_router(hospitals.router)
 app.include_router(dispatches.router)
 app.include_router(ai_routes.router)
 app.include_router(analytics.router)
+app.include_router(routing.router)
+app.include_router(patient.router)
+app.include_router(driver.router)
+app.include_router(hospital_portal.router)
+app.include_router(admin.router)
+app.include_router(notifications.router)
+app.include_router(tracking.router)
+app.include_router(copilot.router)
+app.include_router(public.router)
+app.include_router(telemetry.router)
+app.include_router(mci.router)
+app.include_router(drones.router)
+app.include_router(insurance.router)
+app.include_router(ar.router)
 
 
 @app.get("/", tags=["meta"])
