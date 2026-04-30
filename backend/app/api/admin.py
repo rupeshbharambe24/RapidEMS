@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.policy import enforce as policy_enforce, list_policy, reload_policy
 from ..core.security import hash_password
 from ..database import get_db
 from ..models.ambulance import Ambulance, AmbulanceStatus
@@ -177,6 +178,53 @@ class AuditVerifyOut(BaseModel):
     ok: bool
     first_bad_id: Optional[int] = None
     rows_checked: int
+
+
+class PolicyRow(BaseModel):
+    sub: str
+    obj: str
+    act: str
+    eft: str = "allow"
+
+
+class PolicyTestIn(BaseModel):
+    role: str
+    obj: str
+    act: str
+
+
+class PolicyTestOut(BaseModel):
+    role: str
+    obj: str
+    act: str
+    allowed: bool
+
+
+@router.get("/policy", response_model=List[PolicyRow])
+async def get_policy(_: User = Depends(require_role("admin"))):
+    """Read the seeded RBAC + ABAC policy (casbin)."""
+    rows = list_policy()
+    return [PolicyRow(sub=r[0], obj=r[1], act=r[2],
+                      eft=r[3] if len(r) > 3 else "allow")
+            for r in rows]
+
+
+@router.post("/policy/reload", status_code=204)
+async def reload_policy_route(_: User = Depends(require_role("admin"))):
+    """Re-read core/policy.csv from disk without a backend restart."""
+    reload_policy()
+
+
+@router.post("/policy/test", response_model=PolicyTestOut)
+async def test_policy(
+    payload: PolicyTestIn,
+    _: User = Depends(require_role("admin")),
+):
+    """Quick check 'can ROLE perform ACT on OBJ?' for ad-hoc auditing."""
+    return PolicyTestOut(
+        role=payload.role, obj=payload.obj, act=payload.act,
+        allowed=policy_enforce(payload.role, payload.obj, payload.act),
+    )
 
 
 @router.get("/audit-log/verify", response_model=AuditVerifyOut)

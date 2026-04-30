@@ -1,0 +1,41 @@
+p, admin, *, *, allow
+
+# ── Dispatcher ────────────────────────────────────────────────────────────
+p, dispatcher, emergency*, *, allow
+p, dispatcher, dispatch*, *, allow
+p, dispatcher, ambulance*, read, allow
+p, dispatcher, hospital*, read, allow
+p, dispatcher, ai*, *, allow
+p, dispatcher, copilot*, *, allow
+p, dispatcher, analytics*, read, allow
+p, dispatcher, audit*, read, allow
+p, dispatcher, telemetry*, read, allow
+
+# ── Paramedic ─────────────────────────────────────────────────────────────
+p, paramedic, driver*, *, allow
+p, paramedic, ambulance*, read, allow
+p, paramedic, hospital*, read, allow
+p, paramedic, telemetry*, read, allow
+
+# ── Hospital staff ────────────────────────────────────────────────────────
+p, hospital_staff, hospital*, *, allow
+p, hospital_staff, ambulance*, read, allow
+p, hospital_staff, telemetry*, read, allow
+p, hospital_staff, ai/explain, read, allow
+
+# ── Patient ───────────────────────────────────────────────────────────────
+p, patient, patient/me*, *, allow
+p, patient, patient/sos, *, allow
+p, patient, patient/records*, *, allow
+p, patient, patient/active-emergency, read, allow
+p, patient, telemetry/me*, *, allow
+p, patient, telemetry/batch, *, allow
+p, patient, notifications*, *, allow
+p, patient, track-api/links*, *, allow
+
+# ── Public (anonymous, no role) ───────────────────────────────────────────
+p, public, public-api*, read, allow
+p, public, track-api/*, read, allow
+p, public, health, read, allow
+
+# Admin role inherits everything else (already covered by line 1).
