@@ -23,6 +23,7 @@ from ..models.audit_log import AuditLog
 from ..models.dispatch import Dispatch
 from ..models.emergency import Emergency
 from ..models.hospital import Hospital
+from ..models.tenant import Tenant
 from ..models.user import User, UserRole
 from ..schemas.user import UserOut
 from .deps import require_role
@@ -252,6 +253,76 @@ async def dsr_erase(
     erasure event so the SHA-256 chain still holds."""
     counts = await patient_erasure(db, profile_id, requested_by_user_id=me.id)
     return ErasureOut(counts=counts)
+
+
+class TenantIn(BaseModel):
+    slug: str = Field(..., pattern="^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+    name: str = Field(..., min_length=1, max_length=120)
+    is_active: bool = True
+    city_lat: Optional[str] = None
+    city_lng: Optional[str] = None
+
+
+class TenantOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    slug: str
+    name: str
+    is_active: bool
+    city_lat: Optional[str] = None
+    city_lng: Optional[str] = None
+    created_at: datetime
+
+
+@router.get("/tenants", response_model=List[TenantOut])
+async def list_tenants(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    rows = (await db.scalars(select(Tenant).order_by(Tenant.id.asc()))).all()
+    return [TenantOut.model_validate(t) for t in rows]
+
+
+@router.post("/tenants", response_model=TenantOut, status_code=201)
+async def create_tenant(
+    payload: TenantIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    existing = await db.scalar(select(Tenant).where(Tenant.slug == payload.slug))
+    if existing:
+        raise HTTPException(409, detail="Tenant slug already taken.")
+    t = Tenant(**payload.model_dump())
+    db.add(t)
+    await db.commit()
+    await db.refresh(t)
+    return TenantOut.model_validate(t)
+
+
+class UserTenantAssignIn(BaseModel):
+    tenant_id: Optional[int] = None    # None = clear (legacy mode)
+
+
+@router.patch("/users/{uid}/tenant", response_model=AdminUserOut)
+async def assign_user_tenant(
+    uid: int,
+    payload: UserTenantAssignIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    """Move a user into / out of a tenant. Setting None puts the user back
+    in legacy single-tenant mode."""
+    u = await db.scalar(select(User).where(User.id == uid))
+    if not u:
+        raise HTTPException(404, detail="User not found.")
+    if payload.tenant_id is not None:
+        t = await db.scalar(select(Tenant).where(Tenant.id == payload.tenant_id))
+        if not t:
+            raise HTTPException(404, detail="Tenant not found.")
+    u.tenant_id = payload.tenant_id
+    await db.commit()
+    await db.refresh(u)
+    return AdminUserOut.model_validate(u)
 
 
 @router.get("/policy", response_model=List[PolicyRow])

@@ -1,7 +1,7 @@
 """Hospital facility records."""
 from datetime import datetime
-from sqlalchemy import (Boolean, Column, DateTime, Float, Integer, JSON,
-                        String)
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+                        JSON, String)
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -43,5 +43,9 @@ class Hospital(Base):
     # Phase 1.1 — air dispatch tier. Helicopter route eligibility checks
     # this flag at both ends of the trip.
     has_helipad = Column(Boolean, default=False)
+
+    # Phase 2.8 — multi-tenancy.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True,
+                       index=True)
 
     dispatches = relationship("Dispatch", back_populates="hospital")

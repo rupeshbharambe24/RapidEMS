@@ -36,3 +36,9 @@ class User(Base):
     # verified. Login then requires the 6-digit code in the request body.
     totp_secret = Column(String(64), nullable=True)
     totp_enabled = Column(Boolean, default=False, nullable=False)
+
+    # Phase 2.8 — multi-tenancy. NULL = legacy / default tenant. Every
+    # query that touches domain tables narrows by tenant_id via the
+    # services.tenant helper.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True,
+                       index=True)
