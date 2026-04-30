@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..core.logging import log
+from ..observability.metrics import record_routing, record_routing_fallback
 
 
 # ── Result schema ──────────────────────────────────────────────────────────
@@ -221,17 +222,24 @@ async def route(
     if chain:
         async with httpx.AsyncClient(timeout=httpx.Timeout(6.0)) as client:
             for name, fn in chain:
+                t0 = time.time()
                 try:
                     result = await fn(client, a, b)
+                    record_routing(name, ok=True,
+                                   latency_seconds=time.time() - t0)
                     _cache_set(key, result)
                     return result
                 except Exception as exc:  # noqa: BLE001
+                    record_routing(name, ok=False,
+                                   latency_seconds=time.time() - t0)
                     last_err = f"{name}: {exc}"
                     log.warning(f"routing — {name} failed: {exc}")
 
     fallback = _haversine_route(a, b)
     if last_err:
         log.info(f"routing — using haversine fallback ({last_err})")
+    record_routing_fallback()
+    record_routing("haversine", ok=True, latency_seconds=0.0)
     _cache_set(key, fallback)
     return fallback
 
