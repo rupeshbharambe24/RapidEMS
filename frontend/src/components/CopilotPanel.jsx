@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles, Loader2, Send, X, Wrench, Keyboard } from 'lucide-react'
+import { Sparkles, Loader2, Send, X, Wrench, Keyboard, Mic, Square } from 'lucide-react'
 
 import { copilotApi } from '../api/client.js'
+
+// Browser MediaRecorder picks a sane container automatically; webm/opus is
+// the most widely supported. If the browser doesn't expose MediaRecorder
+// at all (Safari versions, hardened deployments), the mic button hides.
+const VOICE_SUPPORTED =
+  typeof window !== 'undefined' &&
+  typeof navigator !== 'undefined' &&
+  navigator.mediaDevices?.getUserMedia &&
+  typeof window.MediaRecorder !== 'undefined'
 
 const SAMPLE_PROMPTS = [
   'How many ambulances are available right now?',
@@ -13,10 +22,15 @@ const SAMPLE_PROMPTS = [
 export default function CopilotPanel({ open, onClose }) {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [voiceErr, setVoiceErr] = useState(null)
   // history: [{ q, answer, tools, latency_ms, provider, error }]
   const [history, setHistory] = useState([])
   const inputRef = useRef(null)
   const scrollRef = useRef(null)
+  const recorderRef = useRef(null)
+  const chunksRef = useRef([])
 
   // Focus the input when the panel opens
   useEffect(() => {
@@ -68,6 +82,87 @@ export default function CopilotPanel({ open, onClose }) {
     } finally { setBusy(false) }
   }
 
+  // ── Voice path ─────────────────────────────────────────────────────────
+  // Press-and-hold on the mic: start recording. Release: stop and ship the
+  // blob to /copilot/voice. The endpoint transcribes + answers in one round
+  // trip; the transcript shows up as a regular history turn so the
+  // dispatcher can confirm what was heard.
+  async function startRecording() {
+    if (recording || transcribing || busy || !VOICE_SUPPORTED) return
+    setVoiceErr(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const rec = new MediaRecorder(stream)
+      chunksRef.current = []
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+      rec.onstop = () => {
+        // Tear down the mic immediately so the OS indicator goes off.
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(chunksRef.current,
+                              { type: rec.mimeType || 'audio/webm' })
+        chunksRef.current = []
+        if (blob.size < 800) {
+          setVoiceErr('Clip too short — hold the mic for at least a second.')
+          return
+        }
+        sendVoice(blob)
+      }
+      recorderRef.current = rec
+      rec.start()
+      setRecording(true)
+    } catch (e) {
+      setVoiceErr(e?.message || 'Microphone permission denied.')
+    }
+  }
+
+  function stopRecording() {
+    const rec = recorderRef.current
+    if (!rec) return
+    setRecording(false)
+    if (rec.state !== 'inactive') rec.stop()
+    recorderRef.current = null
+  }
+
+  async function sendVoice(blob) {
+    setTranscribing(true)
+    setBusy(true)
+    setHistory(h => [...h, { q: '🎙 …transcribing voice clip', pending: true,
+                             voice: true }])
+    try {
+      const r = await copilotApi.voice({ audio: blob })
+      setHistory(h => {
+        const cp = [...h]
+        const last = cp[cp.length - 1]
+        if (last && last.pending) {
+          cp[cp.length - 1] = {
+            ...last, ...r,
+            q: r.transcript || '(no speech detected)',
+            pending: false,
+            voice: true,
+          }
+        }
+        return cp
+      })
+    } catch (err) {
+      setHistory(h => {
+        const cp = [...h]
+        const last = cp[cp.length - 1]
+        if (last && last.pending) {
+          cp[cp.length - 1] = {
+            ...last, pending: false, voice: true,
+            q: '(voice clip)',
+            answer: err?.response?.data?.detail || 'Voice request failed',
+            error: 'voice_failed',
+          }
+        }
+        return cp
+      })
+    } finally {
+      setTranscribing(false)
+      setBusy(false)
+    }
+  }
+
   return (
     <div
       className={`fixed inset-y-0 right-0 z-40 w-full sm:w-[440px] bg-ink-900/95 backdrop-blur
@@ -117,6 +212,20 @@ export default function CopilotPanel({ open, onClose }) {
         ))}
       </div>
 
+      {/* Voice status / error pill */}
+      {(recording || transcribing || voiceErr) && (
+        <div className={`px-3 py-1.5 text-[11px] font-mono border-t border-line/50
+                        ${voiceErr
+                          ? 'bg-sig-critical/10 text-rose-200'
+                          : recording
+                            ? 'bg-rose-500/10 text-rose-200'
+                            : 'bg-amber-400/10 text-amber-200'}`}>
+          {voiceErr ?? (recording
+            ? '● recording — release to send'
+            : 'transcribing…')}
+        </div>
+      )}
+
       {/* Input */}
       <form
         onSubmit={(e) => { e.preventDefault(); ask() }}
@@ -135,9 +244,31 @@ export default function CopilotPanel({ open, onClose }) {
           placeholder="Ask anything…  (Enter to send · Shift+Enter for newline)"
           className="field flex-1 resize-none min-h-[42px] max-h-[160px]"
         />
+        {VOICE_SUPPORTED && (
+          <button
+            type="button"
+            disabled={busy && !recording}
+            onMouseDown={startRecording}
+            onMouseUp={stopRecording}
+            onMouseLeave={() => recording && stopRecording()}
+            onTouchStart={(e) => { e.preventDefault(); startRecording() }}
+            onTouchEnd={(e) => { e.preventDefault(); stopRecording() }}
+            title="Push and hold to talk"
+            className={`px-3 py-2 rounded border transition-all
+                       ${recording
+                         ? 'bg-rose-500/20 border-rose-400 text-rose-200 animate-pulse'
+                         : 'border-line/60 text-slate-300 hover:border-amber-400/50 hover:text-amber-200'}
+                       disabled:opacity-40 disabled:cursor-not-allowed`}>
+            {recording
+              ? <Square className="w-4 h-4"/>
+              : transcribing
+                ? <Loader2 className="w-4 h-4 animate-spin"/>
+                : <Mic className="w-4 h-4"/>}
+          </button>
+        )}
         <button type="submit" disabled={busy || !query.trim()}
                 className="btn-danger px-3 py-2 disabled:opacity-40">
-          {busy
+          {busy && !transcribing
             ? <Loader2 className="w-4 h-4 animate-spin"/>
             : <Send className="w-4 h-4"/>}
         </button>
@@ -151,7 +282,15 @@ function Turn({ entry }) {
   return (
     <div className="space-y-2">
       <div className="text-sm bg-ink-700/40 border border-line/40 rounded p-2.5">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-0.5">you</div>
+        <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-0.5 flex items-center gap-1.5">
+          <span>you</span>
+          {entry.voice && (
+            <span className="inline-flex items-center gap-1 text-rose-300">
+              <Mic className="w-2.5 h-2.5"/> voice
+              {entry.transcribe_ms ? ` · ${entry.transcribe_ms}ms` : ''}
+            </span>
+          )}
+        </div>
         {entry.q}
       </div>
       <div className={`text-sm rounded p-2.5 border ${
