@@ -1,5 +1,11 @@
 # RapidEMS — Rapid Emergency Management System
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18%20%2B%20Vite-61DAFB?logo=react&logoColor=black)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-LSTM-FF6F00?logo=tensorflow&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
 End-to-end emergency-response platform: triages incoming calls, dispatches the
 nearest capable ambulance, and routes the patient to the best-fit hospital.
 Backed by five locally trained ML models, an optional LLM intake layer for
@@ -612,3 +618,9 @@ DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/rapidems
 The SQLite-specific WAL pragmas in `database.py` skip themselves when the URL
 isn't sqlite. Tables auto-create on first start; seed runs once if the
 `users` table is empty.
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE).
